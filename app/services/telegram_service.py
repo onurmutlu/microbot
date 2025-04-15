@@ -20,81 +20,62 @@ class TelegramService:
         self.client = None
         self.user = self.db.query(User).filter(User.id == user_id).first()
         
-    async def create_session(self, phone: str = None, code: str = None, password: str = None) -> Dict[str, Any]:
+    async def create_session(self, api_id=None, api_hash=None, phone=None, code=None, password=None):
         """Telegram oturumu oluşturur veya var olan oturumu kullanır"""
-        if not self.user:
-            raise ValueError("Kullanıcı bulunamadı")
+        # API bilgilerini kontrol et
+        if api_id and api_hash and phone:
+            # Yeni oturum başlat
+            self.temp_api_id = api_id
+            self.temp_api_hash = api_hash
+            self.temp_phone = phone
             
-        api_id = self.user.api_id
-        api_hash = self.user.api_hash
-        
-        # Telefon numarası belirtilmişse yeni bir oturum başlat
-        if phone:
-            # Session string varsa önce temizle
-            if self.user.session_string:
-                self.user.session_string = None
-                self.db.commit()
-                
-            # Yeni oturum oluştur
-            client = TelegramClient(StringSession(), api_id, api_hash)
-            await client.connect()
-            
-            # Telefon numarasıyla doğrulama kodu gönder
-            await client.send_code_request(phone)
-            return {"message": "Doğrulama kodu telefonunuza gönderildi"}
-            
-        # Doğrulama kodu girilmişse
-        if code:
-            if not self.user.phone:
-                raise ValueError("Telefon numarası bulunamadı")
-                
+            # Oturum oluştur
             client = TelegramClient(StringSession(), api_id, api_hash)
             await client.connect()
             
             try:
-                # Kodu kullanarak oturum aç
-                await client.sign_in(self.user.phone, code)
-            except SessionPasswordNeededError:
-                # İki faktörlü doğrulama etkinse şifre iste
-                if not password:
-                    return {"message": "İki faktörlü doğrulama etkin, şifre gerekli", "two_factor_required": True}
-                
-                await client.sign_in(password=password)
-            
-            # Kullanıcı bilgisini al
-            me = await client.get_me()
-            
-            # Session string'i kaydet
-            session_string = client.session.save()
-            self.user.session_string = session_string
-            self.db.commit()
-            
-            await client.disconnect()
-            return {"message": "Oturum başarıyla oluşturuldu", "user": me.first_name}
-            
-        # Mevcut oturumu kullan
-        if self.user.session_string:
-            try:
-                client = TelegramClient(StringSession(self.user.session_string), api_id, api_hash)
-                await client.connect()
-                
-                if await client.is_user_authorized():
-                    self.client = client
-                    return {"message": "Mevcut oturum kullanılıyor"}
-                
-                # Oturum geçersiz, temizle
-                self.user.session_string = None
-                self.db.commit()
-                return {"message": "Oturum geçersiz, yeniden giriş yapmalısınız", "login_required": True}
-                
+                # Telefon numarasıyla doğrulama kodu gönder
+                await client.send_code_request(phone)
+                self.temp_client = client
+                return {"message": "Doğrulama kodu telefonunuza gönderildi"}
             except Exception as e:
-                logger.error(f"Oturum hatası: {str(e)}")
-                self.user.session_string = None
-                self.db.commit()
-                return {"message": f"Oturum hatası: {str(e)}", "login_required": True}
-                
-        return {"message": "Oturum bulunamadı, giriş yapmalısınız", "login_required": True}
-                
+                await client.disconnect()
+                return {"success": False, "message": f"Hata: {str(e)}"}
+            
+        return {"success": False, "message": "API ID, API Hash ve telefon numarası gerekli"}
+        
+    async def verify_session(self, code=None, password=None):
+        """Doğrulama kodu veya şifre ile oturumu doğrular"""
+        if not hasattr(self, 'temp_client') or not self.temp_client:
+            return {"success": False, "message": "Önce auth endpoint'ini çağırmalısınız"}
+        
+        if not code:
+            return {"success": False, "message": "Doğrulama kodu gerekli"}
+        
+        client = self.temp_client
+        
+        try:
+            # Kodu kullanarak oturum aç
+            await client.sign_in(self.temp_phone, code)
+            # Oturum başarılı
+            session_string = client.session.save()
+            return {"success": True, "session": session_string}
+        except SessionPasswordNeededError:
+            # İki faktörlü doğrulama etkinse şifre iste
+            if not password:
+                return {"two_factor_required": True, "message": "İki faktörlü doğrulama etkin, şifre gerekli"}
+            
+            try:
+                # Şifre ile giriş yap
+                await client.sign_in(password=password)
+                # Oturum başarılı
+                session_string = client.session.save()
+                return {"success": True, "session": session_string}
+            except Exception as e:
+                return {"success": False, "message": f"Şifre hatası: {str(e)}"}
+        except Exception as e:
+            return {"success": False, "message": f"Doğrulama hatası: {str(e)}"}
+        
     async def get_client(self) -> TelegramClient:
         """Aktif bir TelegramClient döner veya oluşturur"""
         if self.client and self.client.is_connected():

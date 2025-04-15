@@ -1,0 +1,13 @@
+version: '3.9'
+
+services:
+  microbot:
+    build: .
+    container_name: microbot-client-001
+    env_file:
+      - .env
+    volumes:
+      - ./sessions:/app/sessions
+    ports:
+      - "5001:80"
+    restart: unless-stopped
