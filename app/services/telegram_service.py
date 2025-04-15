@@ -2,14 +2,17 @@ import os
 import asyncio
 from typing import Optional, List, Dict, Any, Union
 import logging
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, UnauthorizedError, FloodWaitError, ChatAdminRequiredError
+from telethon.tl.types import PeerUser, PeerChannel, PeerChat
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from app.models import User, Group, MessageTemplate, MessageLog
+from app.models import User, Group, MessageTemplate, MessageLog, TargetUser
 from app.config import settings
+from app.services.auto_reply_service import get_matching_reply
+from app.crud import message_template as template_crud
 
 logger = logging.getLogger(__name__)
 
@@ -277,3 +280,344 @@ class TelegramService:
             "success": success_count,
             "errors": error_count
         }
+
+    async def start_event_handlers(self):
+        """Event handler'ları başlatır"""
+        client = await self.get_client()
+        
+        # Handler'lar zaten başlatılmış mı kontrol et
+        if hasattr(self, 'handlers_started') and self.handlers_started:
+            return {"message": "Event handler'lar zaten çalışıyor"}
+        
+        # Özel mesajları dinle
+        @client.on(events.NewMessage(incoming=True, func=lambda e: e.is_private))
+        async def handle_dm_event(event):
+            """Özel mesajları dinler ve otomatik yanıt gönderir"""
+            try:
+                # Mesaj içeriğini al
+                message_text = event.message.text or event.message.message
+                if not message_text:
+                    return
+                    
+                # Gönderen kullanıcı bilgilerini al
+                sender = await event.get_sender()
+                sender_id = sender.id
+                
+                logger.info(f"DM alındı: {message_text[:30]}... Kimden: {sender_id}")
+                
+                # Otomatik yanıt kurallarını kontrol et
+                reply_text = get_matching_reply(self.db, self.user_id, message_text)
+                
+                if reply_text:
+                    # Yanıt gönder
+                    await event.respond(reply_text)
+                    logger.info(f"Otomatik DM yanıtı gönderildi: {reply_text[:30]}...")
+                    
+                    # Hedef kullanıcı kaydı varsa dm_sent olarak işaretle
+                    targets = self.db.query(TargetUser).filter(
+                        TargetUser.telegram_user_id == str(sender_id),
+                        TargetUser.owner_id == self.user_id
+                    ).all()
+                    
+                    for target in targets:
+                        target.is_dm_sent = True
+                    
+                    if targets:
+                        self.db.commit()
+            except Exception as e:
+                logger.error(f"DM işleme hatası: {str(e)}")
+        
+        # Gruplardaki yanıtları dinle
+        @client.on(events.NewMessage(incoming=True, func=lambda e: not e.is_private and e.message.reply_to))
+        async def handle_group_reply_event(event):
+            """Grup içindeki yanıtları dinler"""
+            try:
+                # Grup mesajını al
+                message_text = event.message.text or event.message.message
+                if not message_text:
+                    return
+                
+                # Yanıt verilen mesajı al
+                replied_to = await event.get_reply_message()
+                if not replied_to:
+                    return
+                    
+                # Mesaj kullanıcıya mı yanıt?
+                me = await client.get_me()
+                if replied_to.sender_id != me.id:
+                    return
+                
+                # Gönderen kullanıcı bilgilerini al
+                sender = await event.get_sender()
+                sender_id = sender.id
+                sender_username = sender.username if hasattr(sender, 'username') else None
+                sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip()
+                
+                # Grup bilgilerini al
+                chat = await event.get_chat()
+                chat_id = event.chat_id
+                chat_title = chat.title if hasattr(chat, 'title') else "Grup"
+                
+                logger.info(f"Grup yanıtı alındı: {message_text[:30]}... Kimden: {sender_name}, Grup: {chat_title}")
+                
+                # Otomatik yanıt kurallarını kontrol et
+                reply_text = get_matching_reply(self.db, self.user_id, message_text)
+                
+                if reply_text:
+                    # Yanıt gönder
+                    await event.respond(reply_text, reply_to=event.message)
+                    logger.info(f"Otomatik grup yanıtı gönderildi: {reply_text[:30]}...")
+                
+                # Kullanıcıyı hedef olarak kaydet
+                self._save_target_user(
+                    sender_id, 
+                    str(chat_id),
+                    username=sender_username,
+                    full_name=sender_name
+                )
+            except Exception as e:
+                logger.error(f"Grup yanıtı işleme hatası: {str(e)}")
+                
+        # Gruplardaki etiketlemeleri dinle
+        @client.on(events.NewMessage(incoming=True, func=lambda e: not e.is_private))
+        async def handle_group_mention_event(event):
+            """Gruptaki etiketlemeleri (@kullanıcı) dinler"""
+            try:
+                # Mesaj içeriğini al
+                message_text = event.message.text or event.message.message
+                if not message_text:
+                    return
+                
+                # Kullanıcı bilgilerini al
+                me = await client.get_me()
+                my_username = me.username
+                
+                # Etiketleme var mı kontrol et
+                if not my_username or f"@{my_username}" not in message_text:
+                    return
+                    
+                # Gönderen kullanıcı bilgilerini al
+                sender = await event.get_sender()
+                sender_id = sender.id
+                sender_username = sender.username if hasattr(sender, 'username') else None
+                sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip()
+                
+                # Grup bilgilerini al
+                chat = await event.get_chat()
+                chat_id = event.chat_id
+                chat_title = chat.title if hasattr(chat, 'title') else "Grup"
+                
+                logger.info(f"Grup etiketi alındı: {message_text[:30]}... Kimden: {sender_name}, Grup: {chat_title}")
+                
+                # Otomatik yanıt kurallarını kontrol et
+                reply_text = get_matching_reply(self.db, self.user_id, message_text)
+                
+                if reply_text:
+                    # Yanıt gönder
+                    await event.respond(reply_text, reply_to=event.message)
+                    logger.info(f"Otomatik etiket yanıtı gönderildi: {reply_text[:30]}...")
+                
+                # Kullanıcıyı hedef olarak kaydet
+                self._save_target_user(
+                    sender_id, 
+                    str(chat_id),
+                    username=sender_username,
+                    full_name=sender_name
+                )
+            except Exception as e:
+                logger.error(f"Grup etiketi işleme hatası: {str(e)}")
+        
+        # Handler'ları işaretle
+        self.handlers_started = True
+        self.dm_handler = handle_dm_event
+        self.reply_handler = handle_group_reply_event
+        self.mention_handler = handle_group_mention_event
+        
+        return {"message": "Event handler'lar başlatıldı"}
+    
+    def _save_target_user(self, telegram_user_id, group_id, username=None, full_name=None):
+        """Hedef kullanıcıyı veritabanına kaydeder"""
+        try:
+            # Kullanıcı daha önce kaydedilmiş mi kontrol et
+            existing_target = self.db.query(TargetUser).filter(
+                TargetUser.telegram_user_id == str(telegram_user_id),
+                TargetUser.group_id == group_id,
+                TargetUser.owner_id == self.user_id
+            ).first()
+            
+            if existing_target:
+                # Bilgileri güncelle
+                if username:
+                    existing_target.username = username
+                if full_name:
+                    existing_target.full_name = full_name
+            else:
+                # Yeni hedef kullanıcı oluştur
+                new_target = TargetUser(
+                    owner_id=self.user_id,
+                    telegram_user_id=str(telegram_user_id),
+                    group_id=group_id,
+                    username=username,
+                    full_name=full_name,
+                    is_dm_sent=False,
+                    created_at=datetime.utcnow()
+                )
+                self.db.add(new_target)
+                
+            self.db.commit()
+            logger.info(f"Hedef kullanıcı kaydedildi: {telegram_user_id}")
+        except Exception as e:
+            logger.error(f"Hedef kullanıcı kaydetme hatası: {str(e)}")
+            
+    async def stop_event_handlers(self):
+        """Event handler'ları durdurur"""
+        client = await self.get_client()
+        
+        if hasattr(self, 'handlers_started') and self.handlers_started:
+            # Handler'ları kaldır
+            client.remove_event_handler(self.dm_handler)
+            client.remove_event_handler(self.reply_handler)
+            client.remove_event_handler(self.mention_handler)
+            
+            self.handlers_started = False
+            return {"message": "Event handler'lar durduruldu"}
+        
+        return {"message": "Event handler'lar zaten çalışmıyor"}
+        
+    async def start_scheduled_sender(self):
+        """
+        Zamanlanmış mesaj gönderici başlatır.
+        Bu fonksiyon, kullanıcının seçili gruplarına aktif broadcast mesajlarını
+        belirlenen aralıklarla otomatik olarak gönderir.
+        """
+        # Zaten çalışıyor mu kontrol et
+        if hasattr(self, 'scheduled_sender_running') and self.scheduled_sender_running:
+            return {"message": "Zamanlanmış gönderici zaten çalışıyor"}
+        
+        self.scheduled_sender_running = True
+        self.stop_scheduled_sender = False
+        
+        logger.info(f"Kullanıcı {self.user_id} için zamanlanmış gönderici başlatılıyor")
+        
+        try:
+            # Ana döngü
+            while not self.stop_scheduled_sender:
+                try:
+                    # Telegram client'ı hazırla
+                    client = await self.get_client()
+                    
+                    # Kullanıcının seçili gruplarını al
+                    selected_groups = self.db.query(Group).filter(
+                        Group.user_id == self.user_id,
+                        Group.is_selected == True,
+                        Group.is_active == True
+                    ).all()
+                    
+                    if not selected_groups:
+                        logger.info(f"Kullanıcı {self.user_id} için seçili grup bulunamadı")
+                        await asyncio.sleep(60)  # 1 dakika bekleyip tekrar dene
+                        continue
+                    
+                    # Broadcast tipindeki aktif mesaj şablonlarını al
+                    active_templates = self.db.query(MessageTemplate).filter(
+                        MessageTemplate.user_id == self.user_id,
+                        MessageTemplate.is_active == True,
+                        MessageTemplate.message_type == "broadcast"
+                    ).all()
+                    
+                    if not active_templates:
+                        logger.info(f"Kullanıcı {self.user_id} için aktif broadcast şablonu bulunamadı")
+                        await asyncio.sleep(60)  # 1 dakika bekleyip tekrar dene
+                        continue
+                    
+                    # Her şablon için kontrol yap
+                    for template in active_templates:
+                        # Son gönderim zamanını kontrol et
+                        last_log = self.db.query(MessageLog).filter(
+                            MessageLog.user_id == self.user_id,
+                            MessageLog.message_template_id == template.id,
+                            MessageLog.status == "success"
+                        ).order_by(MessageLog.sent_at.desc()).first()
+                        
+                        current_time = datetime.utcnow()
+                        
+                        # Son gönderim zamanı + interval_minutes sonrası şimdi veya geçmişte mi?
+                        if last_log:
+                            next_send_time = last_log.sent_at + timedelta(minutes=template.interval_minutes)
+                            if next_send_time > current_time:
+                                logger.info(f"Şablon {template.id} için gönderim zamanı gelmedi. Bekliyor... Sonraki gönderim: {next_send_time}")
+                                continue
+                        
+                        # Gruplara mesaj gönder
+                        for group in selected_groups:
+                            try:
+                                # Rate limiting için bekle
+                                await asyncio.sleep(3)  # Minimum bekleme süresi
+                                
+                                # Mesajı gönder
+                                await client.send_message(
+                                    int(group.group_id),
+                                    template.content
+                                )
+                                
+                                # Başarı durumunu kaydet
+                                log = MessageLog(
+                                    group_id=group.group_id,
+                                    group_title=group.title,
+                                    message_template_id=template.id,
+                                    status="success",
+                                    user_id=self.user_id,
+                                    sent_at=current_time
+                                )
+                                self.db.add(log)
+                                
+                                # Grup bilgilerini güncelle
+                                group.last_message = current_time
+                                group.message_count += 1
+                                
+                                logger.info(f"Zamanlanmış mesaj gönderildi: Şablon {template.id}, Grup: {group.title}")
+                                
+                            except Exception as e:
+                                # Hata durumunu logla
+                                log = MessageLog(
+                                    group_id=group.group_id,
+                                    group_title=group.title,
+                                    message_template_id=template.id,
+                                    status="error",
+                                    error_message=str(e)[:100],
+                                    user_id=self.user_id,
+                                    sent_at=current_time
+                                )
+                                self.db.add(log)
+                                logger.error(f"Zamanlanmış mesaj hatası: {str(e)}, Şablon: {template.id}, Grup: {group.title}")
+                        
+                        # Değişiklikleri kaydet
+                        self.db.commit()
+                    
+                    # Bir sonraki kontrol için bekle (5 dakika)
+                    await asyncio.sleep(300)
+                    
+                except Exception as e:
+                    logger.error(f"Zamanlanmış gönderici ana döngü hatası: {str(e)}")
+                    await asyncio.sleep(60)  # Hata durumunda 1 dakika bekleyip tekrar dene
+        
+        except Exception as e:
+            logger.error(f"Zamanlanmış gönderici kritik hata: {str(e)}")
+        finally:
+            self.scheduled_sender_running = False
+            logger.info(f"Kullanıcı {self.user_id} için zamanlanmış gönderici durduruldu")
+            
+        return {"message": "Zamanlanmış gönderici durduruldu"}
+    
+    async def stop_scheduled_sender(self):
+        """Zamanlanmış gönderiyi durdurur"""
+        if hasattr(self, 'scheduled_sender_running') and self.scheduled_sender_running:
+            self.stop_scheduled_sender = True
+            # Durdurmanın etkili olması için bekle
+            for _ in range(10):  # 5 saniye bekle
+                if not self.scheduled_sender_running:
+                    break
+                await asyncio.sleep(0.5)
+            return {"message": "Zamanlanmış gönderici durdurma talebi gönderildi"}
+        
+        return {"message": "Zamanlanmış gönderici zaten çalışmıyor"}

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 import uvicorn
 
 from app.database import SessionLocal, engine, Base
-from app.routers import auth, groups, messages, logs
+from app.routers import auth, groups, messages, logs, auto_reply, message_template
 
 # Veritabanı tablolarını oluştur
 Base.metadata.create_all(bind=engine)
@@ -31,6 +31,8 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(groups.router, prefix="/api/groups", tags=["Groups"])
 app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
+app.include_router(auto_reply.router, tags=["Auto Reply"])
+app.include_router(message_template.router, prefix="/api/message-templates", tags=["Message Templates"])
 
 # Veritabanı bağımlılığı (opsiyonel olarak burada tanımlanabilir)
 def get_db():
