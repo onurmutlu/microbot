@@ -1,5 +1,14 @@
-
 # 🤖 Telegram MicroBot - V1.0a
+
+![Version](https://img.shields.io/badge/version-v1.0a-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Docker-lightgrey)
+![Python](https://img.shields.io/badge/python-3.10+-blue)
+![Status](https://img.shields.io/badge/status-Alpha-orange)
+![Issues](https://img.shields.io/github/issues/onurmutlu/microbot)
+![Stars](https://img.shields.io/github/stars/onurmutlu/microbot)
+![Forks](https://img.shields.io/github/forks/onurmutlu/microbot)
+![LastCommit](https://img.shields.io/github/last-commit/onurmutlu/microbot)
 
 Bu proje, Telegram üzerinden içerik üreticilerinin (özellikle satış odaklı kullanıcılar) gruplara belirli aralıklarla otomatik olarak tanıtım mesajları göndermesini sağlar.  
 Mesajlar, kullanıcının **kendi Telegram hesabı** üzerinden gönderildiği için spam filtrelerine takılmaz.  
