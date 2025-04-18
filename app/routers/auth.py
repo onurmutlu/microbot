@@ -9,14 +9,11 @@ from typing import Optional
 from app.database import get_db
 from app.schemas import UserCreate, UserLogin, VerifyCode, Token
 from app.models import User
-from app.services.auth_service import authenticate_user, create_access_token, get_password_hash
+from app.services.auth_service import authenticate_user, create_access_token, get_password_hash, get_current_active_user
 from app.services.telegram_service import TelegramService
 from app.config import settings
 
-router = APIRouter(
-    prefix="/auth",
-    tags=["auth"]
-)
+router = APIRouter()
 
 # Telethon auth için schema
 class TelegramAuthRequest(BaseModel):
