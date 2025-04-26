@@ -1,0 +1,26 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /logs/*.log
+  json.keys_under_root: true
+  json.add_error_key: true
+  json.message_key: message
+
+output.elasticsearch:
+  hosts: ["elasticsearch:9200"]
+  indices:
+    - index: "microbot-logs-%{+yyyy.MM.dd}"
+
+setup.ilm.enabled: false
+setup.template.enabled: true
+setup.template.name: "microbot"
+setup.template.pattern: "microbot-*"
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644 

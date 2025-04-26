@@ -1,0 +1,54 @@
+FROM python:3.11-slim as builder
+
+WORKDIR /app
+
+# Gerekli sistem paketlerini kurma
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python sanal ortamı oluşturma
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Bağımlılıkları önce ayır ve yükle
+COPY requirements.txt .
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Hafif çalışma ortamı için
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Sanal ortamı kopyala
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Gerekli sistem paketlerini yükle
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Uygulama kullanıcısı oluştur
+RUN useradd -m microbot
+
+# Dizinleri oluştur ve izinleri ayarla
+RUN mkdir -p /app/logs /app/backups /app/static && \
+    chown -R microbot:microbot /app
+
+# Uygulama kodunu kopyala
+COPY --chown=microbot:microbot . .
+
+# Kullanıcıyı değiştir
+USER microbot
+
+# Sağlık kontrolü
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Gunicorn ile uygulama başlatma
+CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"] 

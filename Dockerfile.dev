@@ -1,0 +1,38 @@
+FROM python:3.10-slim
+
+WORKDIR /microbot
+
+# Sistem bağımlılıkları ve geliştirme araçları
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python bağımlılıklarını yükle
+COPY requirements.txt .
+# Ekstra geliştirici bağımlılıkları
+RUN pip install --no-cache-dir -r requirements.txt \
+    black \
+    flake8 \
+    isort \
+    pytest \
+    pytest-cov \
+    ipython \
+    debugpy
+
+# Dizinleri oluştur
+RUN mkdir -p sessions data logs
+
+# Ortam değişkenleri
+ENV PYTHONPATH=/microbot
+ENV SESSION_DIR=/microbot/sessions
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Geliştirme için port aç (debugger için)
+EXPOSE 8000 5678
+
+# Geliştirme sunucusu başlatma komutu
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 

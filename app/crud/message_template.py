@@ -34,26 +34,62 @@ def get_template_by_id(db: Session, template_id: int) -> Optional[MessageTemplat
     """
     return db.query(MessageTemplate).filter(MessageTemplate.id == template_id).first()
 
-def create_template(db: Session, user_id: int, name: str, content: str, interval_minutes: int = 60) -> MessageTemplate:
+def create_template(
+    db: Session, 
+    user_id: int, 
+    name: str, 
+    content: str, 
+    interval_minutes: int = 60,
+    cron_expression: Optional[str] = None
+) -> MessageTemplate:
     """
     Yeni bir mesaj şablonu oluşturur
+    
+    Args:
+        db: Veritabanı oturumu
+        user_id: Kullanıcı ID
+        name: Şablon adı
+        content: Mesaj içeriği
+        interval_minutes: Gönderim sıklığı (dakika)
+        cron_expression: Cron formatında zamanlama ifadesi (opsiyonel)
+        
+    Returns:
+        Oluşturulan mesaj şablonu
     """
     db_template = MessageTemplate(
-        name=name,
-        content=content,
+        name=name, 
+        content=content, 
         interval_minutes=interval_minutes,
+        cron_expression=cron_expression,
         user_id=user_id,
-        is_active=True,
-        created_at=datetime.utcnow()
+        is_active=True
     )
     db.add(db_template)
     db.commit()
     db.refresh(db_template)
     return db_template
 
-def update_template(db: Session, template_id: int, name: str = None, content: str = None, interval_minutes: int = None) -> Optional[MessageTemplate]:
+def update_template(
+    db: Session, 
+    template_id: int, 
+    name: Optional[str] = None, 
+    content: Optional[str] = None, 
+    interval_minutes: Optional[int] = None,
+    cron_expression: Optional[str] = None
+) -> Optional[MessageTemplate]:
     """
     Mesaj şablonunu günceller
+    
+    Args:
+        db: Veritabanı oturumu
+        template_id: Şablon ID
+        name: Yeni şablon adı (opsiyonel)
+        content: Yeni içerik (opsiyonel)
+        interval_minutes: Yeni gönderim sıklığı (opsiyonel)
+        cron_expression: Yeni cron ifadesi (opsiyonel)
+        
+    Returns:
+        Güncellenen şablon veya None
     """
     db_template = get_template_by_id(db, template_id)
     if db_template:
@@ -63,7 +99,8 @@ def update_template(db: Session, template_id: int, name: str = None, content: st
             db_template.content = content
         if interval_minutes is not None:
             db_template.interval_minutes = interval_minutes
-        
+        if cron_expression is not None:
+            db_template.cron_expression = cron_expression
         db.commit()
         db.refresh(db_template)
     return db_template

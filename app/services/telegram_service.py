@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from app.models import User, Group, MessageTemplate, MessageLog, TargetUser
 from app.config import settings
-from app.services.auto_reply_service import get_matching_reply
+from app.services.auto_reply_service import get_matching_reply, get_best_reply
 from app.crud import message_template as template_crud
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,9 @@ class TelegramService:
         self.user_id = user_id
         self.client = None
         self.user = self.db.query(User).filter(User.id == user_id).first()
+        
+        # Session klasörü yoksa oluştur
+        os.makedirs(settings.SESSION_DIR, exist_ok=True)
         
     async def create_session(self, api_id=None, api_hash=None, phone=None, code=None, password=None):
         """Telegram oturumu oluşturur veya var olan oturumu kullanır"""
@@ -78,26 +81,47 @@ class TelegramService:
                 return {"success": False, "message": f"Şifre hatası: {str(e)}"}
         except Exception as e:
             return {"success": False, "message": f"Doğrulama hatası: {str(e)}"}
-        
-    async def get_client(self) -> TelegramClient:
-        """Aktif bir TelegramClient döner veya oluşturur"""
-        if self.client and self.client.is_connected():
-            if await self.client.is_user_authorized():
-                return self.client
                 
-        if not self.user.session_string:
-            raise ValueError("Oturum bulunamadı, giriş yapmalısınız")
+    async def get_client(self) -> TelegramClient:
+        """
+        Telethon client instance'ı oluşturur veya mevcut bir instance döndürür
+        """
+        if self.client and self.client.is_connected():
+                return self.client
             
-        client = TelegramClient(StringSession(self.user.session_string), 
-                              self.user.api_id, 
-                              self.user.api_hash)
-        await client.connect()
+        # Session dosya yolu
+        session_path = os.path.join(settings.SESSION_DIR, f"user_{self.user_id}")
         
-        if not await client.is_user_authorized():
-            raise ValueError("Oturum geçersiz, yeniden giriş yapmalısınız")
-            
-        self.client = client
-        return client
+        # Client oluştur
+        self.client = TelegramClient(
+            session_path,
+            api_id=self.user.api_id,
+            api_hash=self.user.api_hash
+        )
+        
+        # Bağlantı kur
+        await self.client.connect()
+        
+        # Oturum kontrolü
+        if not await self.client.is_user_authorized():
+            # Kayıtlı session string'i varsa kullan
+            if self.user.session_string:
+                try:
+                    await self.client.session.set_dc(
+                        self.user.session_string.split("__")[0],
+                        self.user.session_string.split("__")[1],
+                        self.user.session_string.split("__")[2]
+                    )
+                    logger.info(f"User {self.user_id} session string kullanılarak bağlanıldı")
+                except Exception as e:
+                    logger.error(f"Session string ile bağlantı hatası: {str(e)}")
+                    
+            # Session string yoksa yeni oturum aç
+            if not await self.client.is_user_authorized():
+                logger.info(f"User {self.user_id} için yeni oturum gerekiyor")
+                raise Exception("Unauthorized: Send code first")
+        
+        return self.client
     
     async def discover_groups(self) -> List[Dict[str, Any]]:
         """Kullanıcının üye olduğu grupları keşfeder ve veritabanına kaydeder"""
@@ -122,7 +146,7 @@ class TelegramService:
                 
                 # Veritabanına ekle veya güncelle
                 existing_group = self.db.query(Group).filter(
-                    Group.group_id == group_id,
+                    Group.telegram_id == group_id,
                     Group.user_id == self.user_id
                 ).first()
                 
@@ -133,7 +157,7 @@ class TelegramService:
                     existing_group.is_active = True
                 else:
                     new_group = Group(
-                        group_id=group_id,
+                        telegram_id=group_id,
                         title=title,
                         username=username,
                         member_count=member_count,
@@ -162,7 +186,7 @@ class TelegramService:
         # Seçilen grupları işaretle
         for group_id in group_ids:
             group = self.db.query(Group).filter(
-                Group.group_id == group_id,
+                Group.telegram_id == group_id,
                 Group.user_id == self.user_id
             ).first()
             
@@ -173,112 +197,111 @@ class TelegramService:
         return {"message": f"{len(group_ids)} grup seçildi"}
     
     async def send_message(self, template_id: int, group_ids: List[str] = None) -> Dict[str, Any]:
-        """Belirtilen gruplara mesaj gönderir"""
+        """
+        Belirtilen gruplara mesaj gönderir
+        
+        Args:
+            template_id: Gönderilecek mesaj şablonu ID'si
+            group_ids: Hedef grup ID'leri (boş ise seçili gruplara gönderilir)
+            
+        Returns:
+            Gönderim sonuçları
+        """
+        # Client'ı al
         client = await self.get_client()
         
-        # Mesaj şablonunu al
-        template = self.db.query(MessageTemplate).filter(
-            MessageTemplate.id == template_id,
-            MessageTemplate.user_id == self.user_id
-        ).first()
-        
-        if not template:
-            raise ValueError("Mesaj şablonu bulunamadı")
+        # Şablonu kontrol et
+        template = template_crud.get_template_by_id(self.db, template_id)
+        if not template or template.user_id != self.user_id:
+            return {"error": "Mesaj şablonu bulunamadı"}
         
         # Grupları al
-        query = self.db.query(Group).filter(Group.user_id == self.user_id)
-        
         if group_ids:
-            query = query.filter(Group.group_id.in_(group_ids))
+            groups = self.db.query(Group).filter(
+                Group.user_id == self.user_id,
+                Group.telegram_id.in_(group_ids),
+                Group.is_active == True
+            ).all()
         else:
-            query = query.filter(Group.is_selected == True)
-            
-        groups = query.filter(Group.is_active == True).all()
+            groups = self.db.query(Group).filter(
+                Group.user_id == self.user_id,
+                Group.is_selected == True,
+                Group.is_active == True
+            ).all()
         
         if not groups:
-            return {"message": "Gönderilecek grup bulunamadı", "sent": 0}
+            return {"error": "Gönderilecek grup bulunamadı"}
         
-        # Mesajları gönder
-        success_count = 0
-        error_count = 0
+        # Sonuçları tutacak liste
+        results = []
         
+        # Her gruba gönder
         for group in groups:
             try:
-                # Rate limiting için bekle (5-15 saniye arası)
-                await asyncio.sleep(5)  # Minimum bekleme süresi
-                
                 # Mesajı gönder
-                await client.send_message(
-                    int(group.group_id),
+                message = await client.send_message(
+                    group.telegram_id,
                     template.content
                 )
                 
-                # Başarı durumunu kaydet
+                # Log kaydet
                 log = MessageLog(
-                    group_id=group.group_id,
-                    group_title=group.title,
+                    user_id=self.user_id,
+                    telegram_id=group.telegram_id,
+                    target_user_id=None,
                     message_template_id=template.id,
+                    message_content=message,
                     status="success",
-                    user_id=self.user_id
+                    error_message=None
                 )
                 self.db.add(log)
+                self.db.commit()
                 
-                # Grup bilgilerini güncelle
+                # Grup son mesaj zamanını güncelle
                 group.last_message = datetime.utcnow()
                 group.message_count += 1
                 
-                success_count += 1
-                
-            except ChatAdminRequiredError:
-                # Admin yetkisi gerektiğinde
-                log = MessageLog(
-                    group_id=group.group_id,
-                    group_title=group.title,
-                    message_template_id=template.id,
-                    status="error",
-                    error_message="Admin yetkisi gerekli",
-                    user_id=self.user_id
-                )
-                self.db.add(log)
-                
-                # Grubu devre dışı bırak
-                group.is_active = False
-                error_count += 1
-                
-            except FloodWaitError as e:
-                # Rate limit aşıldığında
-                log = MessageLog(
-                    group_id=group.group_id,
-                    group_title=group.title,
-                    message_template_id=template.id,
-                    status="error",
-                    error_message=f"Rate limit aşıldı: {e.seconds} saniye bekleyin",
-                    user_id=self.user_id
-                )
-                self.db.add(log)
-                
-                # FloodWaitError bekleme süresi
-                await asyncio.sleep(min(e.seconds, 60))  # Maksimum 60 saniye bekle
-                error_count += 1
+                results.append({
+                    "group_id": group.telegram_id,
+                    "group_title": group.title,
+                    "status": "success",
+                    "message_id": message.id
+                })
                 
             except Exception as e:
-                # Diğer hatalar
+                # Hata log'u
                 log = MessageLog(
-                    group_id=group.group_id,
-                    group_title=group.title,
+                    user_id=self.user_id,
+                    telegram_id=group.telegram_id,
+                    target_user_id=None,
                     message_template_id=template.id,
+                    message_content=None,
                     status="error",
-                    error_message=str(e)[:100],  # Hata mesajını 100 karakter ile sınırla
-                    user_id=self.user_id
+                    error_message=str(e)[:100],
+                    sent_at=datetime.utcnow()
                 )
                 self.db.add(log)
-                error_count += 1
+                self.db.commit()
+                
+                results.append({
+                    "group_id": group.telegram_id,
+                    "group_title": group.title,
+                    "status": "error",
+                    "error": str(e)[:100]
+                })
+                
+                logger.error(f"Mesaj gönderme hatası: {str(e)}")
         
+        # Değişiklikleri kaydet
         self.db.commit()
+        
         return {
-            "message": f"{success_count} grup mesajı başarıyla gönderildi, {error_count} hata",
-            "success": success_count,
-            "errors": error_count
+            "template_id": template_id,
+            "template_name": template.name,
+            "group_count": len(groups),
+            "success_count": len([r for r in results if r["status"] == "success"]),
+            "error_count": len([r for r in results if r["status"] == "error"]),
+            "results": results
         }
 
     async def start_event_handlers(self):
@@ -302,16 +325,18 @@ class TelegramService:
                 # Gönderen kullanıcı bilgilerini al
                 sender = await event.get_sender()
                 sender_id = sender.id
+                sender_username = sender.username if hasattr(sender, 'username') else None
+                sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip()
                 
                 logger.info(f"DM alındı: {message_text[:30]}... Kimden: {sender_id}")
                 
-                # Otomatik yanıt kurallarını kontrol et
-                reply_text = get_matching_reply(self.db, self.user_id, message_text)
+                # Gelişmiş otomatik yanıt kurallarını kontrol et
+                reply_text, meta = get_best_reply(self.db, self.user_id, message_text)
                 
                 if reply_text:
                     # Yanıt gönder
                     await event.respond(reply_text)
-                    logger.info(f"Otomatik DM yanıtı gönderildi: {reply_text[:30]}...")
+                    logger.info(f"Otomatik DM yanıtı gönderildi: {reply_text[:30]}... (Eşleşme tipi: {meta.get('match_type', 'bilinmiyor')})")
                     
                     # Hedef kullanıcı kaydı varsa dm_sent olarak işaretle
                     targets = self.db.query(TargetUser).filter(
@@ -324,6 +349,8 @@ class TelegramService:
                     
                     if targets:
                         self.db.commit()
+                else:
+                    logger.info(f"DM yanıtı bulunamadı: {message_text[:30]}...")
             except Exception as e:
                 logger.error(f"DM işleme hatası: {str(e)}")
         
@@ -360,13 +387,24 @@ class TelegramService:
                 
                 logger.info(f"Grup yanıtı alındı: {message_text[:30]}... Kimden: {sender_name}, Grup: {chat_title}")
                 
-                # Otomatik yanıt kurallarını kontrol et
-                reply_text = get_matching_reply(self.db, self.user_id, message_text)
+                # Gelişmiş otomatik yanıt kurallarını kontrol et
+                reply_text, meta = get_best_reply(self.db, self.user_id, message_text)
                 
                 if reply_text:
+                    # Yanıt içindeki dinamik alanları doldur
+                    reply_vars = {
+                        "name": sender_name,
+                        "username": sender_username or "",
+                        "group": chat_title
+                    }
+                    
+                    # Metadatadaki değişkenleri ekle
+                    if meta.get("match_type") == "regex" and meta.get("named_captures"):
+                        reply_vars.update(meta["named_captures"])
+                    
                     # Yanıt gönder
                     await event.respond(reply_text, reply_to=event.message)
-                    logger.info(f"Otomatik grup yanıtı gönderildi: {reply_text[:30]}...")
+                    logger.info(f"Otomatik grup yanıtı gönderildi: {reply_text[:30]}... (Eşleşme tipi: {meta.get('match_type', 'bilinmiyor')})")
                 
                 # Kullanıcıyı hedef olarak kaydet
                 self._save_target_user(
@@ -409,13 +447,24 @@ class TelegramService:
                 
                 logger.info(f"Grup etiketi alındı: {message_text[:30]}... Kimden: {sender_name}, Grup: {chat_title}")
                 
-                # Otomatik yanıt kurallarını kontrol et
-                reply_text = get_matching_reply(self.db, self.user_id, message_text)
+                # Gelişmiş otomatik yanıt kurallarını kontrol et
+                reply_text, meta = get_best_reply(self.db, self.user_id, message_text)
                 
                 if reply_text:
+                    # Yanıt içindeki dinamik alanları doldur
+                    reply_vars = {
+                        "name": sender_name,
+                        "username": sender_username or "",
+                        "group": chat_title
+                    }
+                    
+                    # Metadatadaki değişkenleri ekle
+                    if meta.get("match_type") == "regex" and meta.get("named_captures"):
+                        reply_vars.update(meta["named_captures"])
+                    
                     # Yanıt gönder
                     await event.respond(reply_text, reply_to=event.message)
-                    logger.info(f"Otomatik etiket yanıtı gönderildi: {reply_text[:30]}...")
+                    logger.info(f"Otomatik etiket yanıtı gönderildi: {reply_text[:30]}... (Eşleşme tipi: {meta.get('match_type', 'bilinmiyor')})")
                 
                 # Kullanıcıyı hedef olarak kaydet
                 self._save_target_user(
@@ -435,39 +484,30 @@ class TelegramService:
         
         return {"message": "Event handler'lar başlatıldı"}
     
-    def _save_target_user(self, telegram_user_id, group_id, username=None, full_name=None):
-        """Hedef kullanıcıyı veritabanına kaydeder"""
-        try:
-            # Kullanıcı daha önce kaydedilmiş mi kontrol et
-            existing_target = self.db.query(TargetUser).filter(
-                TargetUser.telegram_user_id == str(telegram_user_id),
-                TargetUser.group_id == group_id,
-                TargetUser.owner_id == self.user_id
-            ).first()
-            
-            if existing_target:
-                # Bilgileri güncelle
-                if username:
-                    existing_target.username = username
-                if full_name:
-                    existing_target.full_name = full_name
-            else:
-                # Yeni hedef kullanıcı oluştur
-                new_target = TargetUser(
-                    owner_id=self.user_id,
-                    telegram_user_id=str(telegram_user_id),
-                    group_id=group_id,
-                    username=username,
-                    full_name=full_name,
-                    is_dm_sent=False,
-                    created_at=datetime.utcnow()
-                )
-                self.db.add(new_target)
-                
+    def _save_target_user(self, user_id, group_id, username=None, full_name=None):
+        """
+        Hedef kullanıcıyı veritabanına kaydeder (yoksa oluşturur)
+        """
+        target = self.db.query(TargetUser).filter(
+            TargetUser.telegram_user_id == str(user_id),
+            TargetUser.group_id == group_id,
+            TargetUser.owner_id == self.user_id
+        ).first()
+        
+        if not target:
+            target = TargetUser(
+                telegram_user_id=str(user_id),
+                group_id=group_id,
+                username=username,
+                full_name=full_name,
+                is_dm_sent=False,
+                owner_id=self.user_id
+            )
+            self.db.add(target)
             self.db.commit()
-            logger.info(f"Hedef kullanıcı kaydedildi: {telegram_user_id}")
-        except Exception as e:
-            logger.error(f"Hedef kullanıcı kaydetme hatası: {str(e)}")
+            logger.info(f"Yeni hedef kullanıcı eklendi: {username or user_id} ({group_id})")
+        
+        return target
             
     async def stop_event_handlers(self):
         """Event handler'ları durdurur"""
@@ -556,20 +596,22 @@ class TelegramService:
                                 
                                 # Mesajı gönder
                                 await client.send_message(
-                                    int(group.group_id),
+                                    int(group.telegram_id),
                                     template.content
                                 )
                                 
-                                # Başarı durumunu kaydet
+                                # Mesaj gönderme işlemini logla
                                 log = MessageLog(
-                                    group_id=group.group_id,
-                                    group_title=group.title,
-                                    message_template_id=template.id,
-                                    status="success",
                                     user_id=self.user_id,
-                                    sent_at=current_time
+                                    telegram_id=group.telegram_id,
+                                    target_user_id=None,
+                                    message_template_id=template.id,
+                                    message_content=None,
+                                    status="success",
+                                    error_message=None
                                 )
                                 self.db.add(log)
+                                self.db.commit()
                                 
                                 # Grup bilgilerini güncelle
                                 group.last_message = current_time
@@ -580,19 +622,18 @@ class TelegramService:
                             except Exception as e:
                                 # Hata durumunu logla
                                 log = MessageLog(
-                                    group_id=group.group_id,
-                                    group_title=group.title,
+                                    user_id=self.user_id,
+                                    telegram_id=group.telegram_id,
+                                    target_user_id=None,
                                     message_template_id=template.id,
+                                    message_content=None,
                                     status="error",
                                     error_message=str(e)[:100],
-                                    user_id=self.user_id,
                                     sent_at=current_time
                                 )
                                 self.db.add(log)
+                                self.db.commit()
                                 logger.error(f"Zamanlanmış mesaj hatası: {str(e)}, Şablon: {template.id}, Grup: {group.title}")
-                        
-                        # Değişiklikleri kaydet
-                        self.db.commit()
                     
                     # Bir sonraki kontrol için bekle (5 dakika)
                     await asyncio.sleep(300)

@@ -1,0 +1,47 @@
+2025-04-26 23:01:18,953 - app.main - ERROR - Veritabanı bağlantı hatası: Textual SQL expression 'SELECT 1' should be explicitly declared as text('SELECT 1')
+2025-04-26 23:01:18,956 - app.main - INFO - Uygulama başlatıldı
+2025-04-26 23:01:49,282 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-26 23:02:24,112 - app.main - ERROR - Veritabanı bağlantı hatası: Textual SQL expression 'SELECT 1' should be explicitly declared as text('SELECT 1')
+2025-04-26 23:02:24,114 - app.main - INFO - Uygulama başlatıldı
+2025-04-26 23:30:21,384 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-26 23:30:47,503 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-26 23:30:47,506 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[User(users)], expression 'License' failed to locate a name ('License'). If this is a class name, consider adding this relationship() to the <class 'app.models.user.User'> class after both dependent classes have been defined.
+2025-04-26 23:30:47,506 - app.main - INFO - Uygulama başlatıldı
+2025-04-26 23:31:24,406 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-26 23:31:52,834 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-26 23:31:52,836 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[User(users)], expression 'License' failed to locate a name ('License'). If this is a class name, consider adding this relationship() to the <class 'app.models.user.User'> class after both dependent classes have been defined.
+2025-04-26 23:31:52,837 - app.main - INFO - Uygulama başlatıldı
+2025-04-26 23:33:26,451 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-26 23:33:51,341 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-26 23:33:51,353 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[User(users)], expression 'License' failed to locate a name ('License'). If this is a class name, consider adding this relationship() to the <class 'app.models.user.User'> class after both dependent classes have been defined.
+2025-04-26 23:33:51,353 - app.main - INFO - Uygulama başlatıldı
+2025-04-26 23:43:57,636 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-26 23:44:18,094 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-26 23:44:18,105 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[User(users)], expression 'License' failed to locate a name ('License'). If this is a class name, consider adding this relationship() to the <class 'app.models.user.User'> class after both dependent classes have been defined.
+2025-04-26 23:44:18,109 - app.main - INFO - Uygulama başlatıldı
+2025-04-26 23:44:33,595 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-27 01:18:07,904 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-27 01:18:08,167 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-27 01:18:08,168 - app.main - INFO - Uygulama başlatıldı
+2025-04-27 01:19:58,320 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-27 01:19:58,610 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-27 01:24:50,717 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-27 01:25:23,518 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-27 01:25:23,724 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-27 01:25:23,725 - app.main - INFO - Uygulama başlatıldı
+2025-04-27 01:30:02,965 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-27 01:30:23,529 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-27 01:30:23,836 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-27 01:30:23,837 - app.main - INFO - Uygulama başlatıldı
+2025-04-27 01:32:31,042 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-27 01:32:58,728 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-27 01:32:59,519 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-27 01:32:59,523 - app.main - INFO - Uygulama başlatıldı
+2025-04-27 01:33:24,437 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-27 01:33:24,649 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-27 01:33:24,650 - app.main - INFO - Uygulama başlatıldı
+2025-04-27 01:34:23,513 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-27 01:34:39,953 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-27 01:34:40,167 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-27 01:34:40,168 - app.main - INFO - Uygulama başlatıldı
+2025-04-27 01:38:55,641 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745707135.342991
