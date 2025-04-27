@@ -5,11 +5,12 @@ Telegram gruplarını yönetmek için geliştirilmiş bir bot uygulaması.
 ## Özellikler
 
 - Telegram grup ve kullanıcı yönetimi
-- Otomatik yanıt sistemi
+- Gelişmiş otomatik yanıt sistemi (regex desteği ile)
 - Zamanlanmış mesaj gönderimi
 - Otomatik bot başlatma
-- WebSocket desteği
+- WebSocket tabanlı gerçek zamanlı veri senkronizasyonu
 - REST API
+- Kullanıcı ve grup hedefleme
 
 ## Kurulum
 
@@ -49,6 +50,38 @@ GET /api/scheduler/auto-start-settings
 # Ayarları güncellemek için
 POST /api/scheduler/auto-start-settings
 ```
+
+## Otomatik Yanıt Sistemi
+
+MicroBot, gelişmiş bir otomatik yanıt sistemi sunar:
+
+- Anahtar kelime eşleştirmesi (virgülle ayrılmış)
+- Regex tabanlı eşleştirme (`r:` öneki ile)
+- Dinamik değişken desteği (`{name}`, `{username}`, `{group}` vb.)
+- Test API'leri ile yanıt kurallarını ve regex ifadelerini test etme
+
+Örnek:
+```
+# Anahtar kelime eşleştirme
+Tetikleyici: merhaba,selam,hi
+Yanıt: Merhaba {name}! Nasıl yardımcı olabilirim?
+
+# Regex eşleştirme
+Tetikleyici: r:ne zaman (.*?)
+Yanıt: {group1} hakkında yakında bilgi vereceğim!
+```
+
+## Gerçek Zamanlı Veri Senkronizasyonu
+
+MicroBot, WebSocket tabanlı gerçek zamanlı veri güncellemesi sunar:
+
+- Bağlantı durumu izleme
+- Otomatik yeniden bağlanma
+- Gerçek zamanlı güncelleme bildirimleri
+  - Mesaj şablonu değişiklikleri
+  - Otomatik yanıt kuralı güncellemeleri
+  - Grup listesi değişiklikleri
+  - Zamanlayıcı durumu güncellemeleri
 
 ## Sistem Yönetimi
 

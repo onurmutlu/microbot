@@ -30,12 +30,12 @@ class Backup(Base):
     file_path = Column(String, nullable=False)
     file_size = Column(Integer)  # Byte cinsinden
     checksum = Column(String)  # Dosya bütünlük kontrolü
-    backup_metadata = Column(Text)  # JSON serialized metadata about the backup
+    backup_metadata = Column(Text, nullable=True)  # JSON formatında yedekleme detayları
     is_encrypted = Column(Boolean, default=False)
-    encryption_key = Column(String)
-    storage_location = Column(String)  # Yedekleme konumu
-    retention_period = Column(Integer)  # Saklama süresi (gün)
-    last_verified = Column(DateTime)
+    encryption_key = Column(String, nullable=True)
+    storage_location = Column(String, nullable=True)  # Yedekleme konumu
+    retention_period = Column(Integer, nullable=True)  # Gün olarak saklama süresi
+    last_verified = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

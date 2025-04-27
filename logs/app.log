@@ -45,3 +45,19 @@
 2025-04-27 01:34:40,167 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
 2025-04-27 01:34:40,168 - app.main - INFO - Uygulama başlatıldı
 2025-04-27 01:38:55,641 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745707135.342991
+2025-04-27 10:08:32,343 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745707135.342991
+2025-04-27 10:08:43,239 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745737723.225841
+2025-04-27 12:21:26,232 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745737723.225841
+2025-04-27 12:21:51,854 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745745711.837609
+2025-04-27 12:25:35,604 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-27 12:25:35,670 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-27 13:22:24,796 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745745711.837609
+2025-04-27 13:22:39,901 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745749359.887514
+2025-04-27 13:58:12,428 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745749359.887514
+2025-04-27 13:58:39,602 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745751519.589773
+2025-04-27 14:12:55,813 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-27 14:12:55,827 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-27 14:19:48,832 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745751519.589773
+2025-04-27 14:19:58,878 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745752798.742232
+2025-04-27 14:32:14,627 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-27 14:32:14,677 - app.main - ERROR - HTTP error 401: Not authenticated

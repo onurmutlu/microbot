@@ -2,6 +2,38 @@
 
 Bu proje, [Semantik Sürümleme](https://semver.org/lang/tr/) kurallarını takip etmektedir.
 
+## [1.4.0] - 2024-04-27
+
+### Gelişmiş Otomatik Yanıt Sistemi
+- Regex destek motoru iyileştirildi
+- Değişken işleme mekanizması geliştirildi
+- Yanıt kuralları test arayüzü güncellendi
+- Regex test aracı optimize edildi
+
+### Şablon Yönetimi Geliştirmeleri
+- Şablon yönetim arayüzü yenilendi
+- Varsayılan şablonlar eklendi
+- Şablon kategorileri eklendi
+- Şablonlar arası kopyalama özelliği
+
+### WebSocket Entegrasyonu
+- Gerçek zamanlı veri güncelleme mekanizması iyileştirildi
+- WebSocket güvenlik kontrolleri güçlendirildi
+- Bağlantı yönetimi geliştirmeleri
+- Veri senkronizasyon optimizasyonları
+
+### Performans İyileştirmeleri
+- Veritabanı sorguları optimize edildi
+- Telegram API bağlantı yönetimi iyileştirildi
+- Bellek kullanımı azaltıldı
+- Yanıt süreleri iyileştirildi
+
+### Hata Düzeltmeleri
+- WebSocket bağlantı kopması sorunları giderildi
+- Otomatik yanıt kurallarındaki eşleştirme hataları düzeltildi
+- Zamanlayıcı servisindeki bellek sızıntısı sorunu çözüldü
+- API erişim kontrollerindeki güvenlik açıkları kapatıldı
+
 ## [1.3.0] - 2024-03-21
 
 ### Frontend Geliştirmeleri
@@ -45,40 +77,34 @@ Bu proje, [Semantik Sürümleme](https://semver.org/lang/tr/) kurallarını taki
 - Dokümantasyon güncellendi
 - Deployment süreçleri iyileştirildi
 
-## [1.2.0] - 2023-XX-XX
+## [1.2.0] - 2024-03-25
 
-### Eklenen
-- Zamanlanmış mesaj gönderimi servisi
-  - Kullanıcı bazlı mesaj zamanlayıcısı
-  - Şablonları belirli aralıklarla otomatik gönderme
-  - Aktif/pasif durumu takip etme
-  - API üzerinden kontrol endpointleri
-- Zamanlayıcı yönetimi için yeni API endpointleri:
-  - `POST /api/scheduler/start` - Zamanlanmış mesaj gönderimini başlatma
-  - `POST /api/scheduler/stop` - Zamanlanmış mesaj gönderimini durdurma
-  - `GET /api/scheduler/status` - Zamanlayıcı durumunu kontrol etme
-- Kapsamlı birim testleri
+### Frontend Geliştirmeleri
+- WebSocket istemci implementasyonu tamamlandı
+- Gerçek zamanlı veri senkronizasyonu eklendi
+- Otomatik yeniden bağlanma mekanizması eklendi
+- Hata yönetimi geliştirildi
+- UI/UX iyileştirmeleri yapıldı
 
-### Değişen
-- Swagger arayüzünde Bearer token desteği iyileştirmesi
-- Uygulama kapanırken zamanlayıcıların güvenli şekilde durdurulması
+### Backend Geliştirmeleri
+- WebSocket sunucusu optimizasyonu
+- Veri senkronizasyonu iyileştirmeleri
+- Performans optimizasyonları
+- Hata yönetimi geliştirmeleri
 
-### Düzeltilen
-- Çeşitli hata işleme ve loglama iyileştirmeleri
+## [1.1.0] - 2024-03-22
 
-## [1.1.0] - 2023-XX-XX
+### Frontend-Backend Entegrasyonu
+- WebSocket bağlantı yönetimi eklendi
+- Veri senkronizasyonu mekanizması kuruldu
+- Otomatik yeniden bağlanma eklendi
+- Hata yönetimi geliştirildi
 
-### Eklenen
-- Otomatik yanıt sistemi
-  - Regex desteği ile güçlü patern eşleştirme
-  - Değişken kullanımı için {name}, {group} gibi şablonlar
-  - Test endpointleri ve doğrulama araçları
-
-### Değişen
-- Telegram entegrasyonu geliştirmeleri
-  - Mention algılama ve yanıtlama
-  - Özel mesaj yönetimi
-  - Grup etkileşimleri için event handler'lar
+### Backend Geliştirmeleri
+- WebSocket sunucusu implementasyonu
+- Gerçek zamanlı olay yönetimi
+- Kullanıcı kimlik doğrulama
+- Veri senkronizasyonu
 
 ## [1.0.0] - 2024-03-20
 
@@ -102,6 +128,50 @@ Bu proje, [Semantik Sürümleme](https://semver.org/lang/tr/) kurallarını taki
 - WebSocket bağlantı kopması sorunları
 - Mesaj kaybı sorunları
 - Performans optimizasyonları
+
+## [0.9.0] - 2024-03-15
+
+### Eklenen
+- İlk WebSocket implementasyonu
+- Temel Redis entegrasyonu
+- Basit mesajlaşma özellikleri
+
+### Düzeltilen
+- Bağlantı yönetimi sorunları
+- Mesaj formatı standardizasyonu
+
+## [0.7.0] - 2024-02-15
+
+### Eklenenler
+- WebSocket tabanlı gerçek zamanlı veri senkronizasyonu
+- Bağlantı durumu göstergesi
+- Otomatik yeniden bağlanma mekanizması
+- Global hata yönetimi (Error Boundary)
+- Zustand tabanlı state management
+- Performans optimizasyonları
+
+### Değişiklikler
+- WebSocket entegrasyonu ile gerçek zamanlı veri güncellemeleri
+- Bağlantı durumu izleme ve kullanıcı bildirimleri
+- Hata yönetimi merkezileştirildi
+- State management çözümü eklendi
+
+## [0.6.0] - 2024-02-01
+
+### Eklenenler
+- WebSocket tabanlı gerçek zamanlı veri senkronizasyonu
+- Bağlantı durumu göstergesi
+- Otomatik yeniden bağlanma mekanizması
+- Gerçek zamanlı güncelleme bildirimleri
+  - Mesaj şablonu değişiklikleri
+  - Otomatik yanıt kuralı güncellemeleri
+  - Grup listesi değişiklikleri
+  - Zamanlayıcı durumu güncellemeleri
+
+### Değişiklikler
+- API iletişimi WebSocket desteği ile genişletildi
+- Kullanıcı arayüzüne bağlantı durumu göstergesi eklendi
+- Veri güncellemeleri için polling yerine WebSocket kullanılmaya başlandı
 
 ## [0.2.0] - 2023-09-10
 
@@ -149,94 +219,4 @@ Bu proje, [Semantik Sürümleme](https://semver.org/lang/tr/) kurallarını taki
 ### Eklenen
 - Proje başlangıç yapısı
 - FastAPI ve SQLAlchemy entegrasyonu
-- Temel proje dosyaları ve klasör yapısı
-
-## [1.5.0] - YYYY-MM-DD
-
-### Değişiklikler
-- SQLite desteği kaldırıldı, artık tamamen PostgreSQL kullanılıyor
-- Veritabanı bağlantı havuzu ayarları optimize edildi
-- Redis entegrasyonu geliştirildi
-
-### Eklenenler
-- Prometheus ve Grafana entegrasyonu
-- ELK Stack ile log yönetimi
-- API anahtarı yönetimi
-- Kullanıcı aktivite kayıtları
-
-### Düzeltmeler
-- Zamanlayıcı servisindeki bellek sızıntısı sorunu giderildi
-- PostgreSQL bağlantı hatalarını otomatik düzeltme mekanizması eklendi
-
-## [0.9.0] - 2024-03-15
-
-### Eklenen
-- İlk WebSocket implementasyonu
-- Temel Redis entegrasyonu
-- Basit mesajlaşma özellikleri
-
-### Düzeltilen
-- Bağlantı yönetimi sorunları
-- Mesaj formatı standardizasyonu
-
-## [1.2.0] - 2024-03-25
-
-### Frontend Geliştirmeleri
-- WebSocket istemci implementasyonu tamamlandı
-- Gerçek zamanlı veri senkronizasyonu eklendi
-- Otomatik yeniden bağlanma mekanizması eklendi
-- Hata yönetimi geliştirildi
-- UI/UX iyileştirmeleri yapıldı
-
-### Backend Geliştirmeleri
-- WebSocket sunucusu optimizasyonu
-- Veri senkronizasyonu iyileştirmeleri
-- Performans optimizasyonları
-- Hata yönetimi geliştirmeleri
-
-## [1.1.0] - 2024-03-22
-
-### Frontend-Backend Entegrasyonu
-- WebSocket bağlantı yönetimi eklendi
-- Veri senkronizasyonu mekanizması kuruldu
-- Otomatik yeniden bağlanma eklendi
-- Hata yönetimi geliştirildi
-
-### Backend Geliştirmeleri
-- WebSocket sunucusu implementasyonu
-- Gerçek zamanlı olay yönetimi
-- Kullanıcı kimlik doğrulama
-- Veri senkronizasyonu
-
-## [0.7.0] - 2024-07-01
-
-### Eklenenler
-- WebSocket tabanlı gerçek zamanlı veri senkronizasyonu
-- Bağlantı durumu göstergesi
-- Otomatik yeniden bağlanma mekanizması
-- Global hata yönetimi (Error Boundary)
-- Zustand tabanlı state management
-- Performans optimizasyonları
-
-### Değişiklikler
-- WebSocket entegrasyonu ile gerçek zamanlı veri güncellemeleri
-- Bağlantı durumu izleme ve kullanıcı bildirimleri
-- Hata yönetimi merkezileştirildi
-- State management çözümü eklendi
-
-## [0.6.0] - 2024-06-30 (Planlanan)
-
-### Eklenenler
-- WebSocket tabanlı gerçek zamanlı veri senkronizasyonu
-- Bağlantı durumu göstergesi
-- Otomatik yeniden bağlanma mekanizması
-- Gerçek zamanlı güncelleme bildirimleri
-  - Mesaj şablonu değişiklikleri
-  - Otomatik yanıt kuralı güncellemeleri
-  - Grup listesi değişiklikleri
-  - Zamanlayıcı durumu güncellemeleri
-
-### Değişiklikler
-- API iletişimi WebSocket desteği ile genişletildi
-- Kullanıcı arayüzüne bağlantı durumu göstergesi eklendi
-- Veri güncellemeleri için polling yerine WebSocket kullanılmaya başlandı 
+- Temel proje dosyaları ve klasör yapısı 

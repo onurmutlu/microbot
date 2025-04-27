@@ -5,11 +5,14 @@ import logging
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, UnauthorizedError, FloodWaitError, ChatAdminRequiredError
+from telethon.errors.rpcerrorlist import UserAlreadyParticipantError, ChannelPrivateError
 from telethon.tl.types import PeerUser, PeerChannel, PeerChat
+from telethon.tl.functions.channels import JoinChannelRequest, GetFullChannelRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 
-from app.models import User, Group, MessageTemplate, MessageLog, TargetUser
+from app.models import User, Group, MessageTemplate, MessageLog, TargetUser, TelegramSession, SessionStatus
 from app.config import settings
 from app.services.auto_reply_service import get_matching_reply, get_best_reply
 from app.crud import message_template as template_crud
@@ -662,3 +665,227 @@ class TelegramService:
             return {"message": "Zamanlanmış gönderici durdurma talebi gönderildi"}
         
         return {"message": "Zamanlanmış gönderici zaten çalışmıyor"}
+
+    async def join_group(self, session_id: int, group_link: str) -> Dict[str, Any]:
+        """
+        Kullanıcıyı belirtilen gruba katılmak için kullanılır
+        
+        Args:
+            session_id: Telegram session ID
+            group_link: Katılınacak grup linki (https://t.me/username veya @username formatında)
+            
+        Returns:
+            Katılım sonucu
+        """
+        try:
+            # Session kontrolü
+            session = self.db.query(TelegramSession).filter(
+                TelegramSession.id == session_id,
+                TelegramSession.user_id == self.user_id,
+                TelegramSession.status == SessionStatus.ACTIVE
+            ).first()
+            
+            if not session:
+                return {
+                    "success": False,
+                    "message": f"ID'si {session_id} olan aktif bir oturum bulunamadı."
+                }
+            
+            # Grup linkini temizle
+            if group_link.startswith("https://t.me/"):
+                # https://t.me/username formatı
+                username = group_link.split("https://t.me/")[1]
+                # Eğer bir joinchat linki ise
+                if username.startswith("+"):
+                    invite_hash = username.replace("+", "")
+            elif group_link.startswith("@"):
+                # @username formatı
+                username = group_link[1:]
+            else:
+                # Sadece username formatı
+                username = group_link
+            
+            # Client'ı hazırla
+            # Session string kullanarak özel client oluştur
+            client = TelegramClient(StringSession(session.session_string), 
+                                   session.api_id, 
+                                   session.api_hash)
+            await client.connect()
+            
+            try:
+                # Kullanıcının grup bilgilerini al
+                if username.startswith("+") or "joinchat" in group_link:
+                    # Davet linki ile katılım
+                    invite_hash = username.replace("+", "")
+                    try:
+                        response = await client(ImportChatInviteRequest(invite_hash))
+                        chat = response.chats[0]
+                        entity = chat
+                    except ChannelPrivateError:
+                        await client.disconnect()
+                        return {
+                            "success": False,
+                            "message": "Grup gizli, katılım yapılamadı."
+                        }
+                else:
+                    try:
+                        # Kullanıcı adı ile katılım
+                        entity = await client.get_entity(username)
+                        # Gruba katıl
+                        await client(JoinChannelRequest(entity))
+                    except ChannelPrivateError:
+                        await client.disconnect()
+                        return {
+                            "success": False,
+                            "message": "Grup gizli, katılım yapılamadı."
+                        }
+                
+                # Grup detaylarını al
+                if hasattr(entity, 'id'):
+                    full_entity = await client(GetFullChannelRequest(channel=entity))
+                    members_count = full_entity.full_chat.participants_count if hasattr(full_entity.full_chat, 'participants_count') else None
+                else:
+                    members_count = None
+                
+                # Veritabanında kontrol et
+                existing_group = self.db.query(Group).filter(
+                    Group.group_id == entity.id,
+                    Group.user_id == self.user_id,
+                    Group.session_id == session_id
+                ).first()
+                
+                joined_at = datetime.utcnow()
+                
+                if existing_group:
+                    # Mevcut grubu güncelle
+                    existing_group.group_name = entity.title
+                    existing_group.username = entity.username if hasattr(entity, 'username') else None
+                    existing_group.members_count = members_count
+                    existing_group.is_active = True
+                    existing_group.updated_at = datetime.utcnow()
+                    
+                    self.db.commit()
+                    
+                    # Zaten üye olduğunu belirt
+                    await client.disconnect()
+                    return {
+                        "success": True,
+                        "message": f"Zaten {entity.title} grubuna üyesiniz.",
+                        "group_data": {
+                            "id": entity.id,
+                            "title": entity.title,
+                            "username": entity.username if hasattr(entity, 'username') else None,
+                            "members_count": members_count,
+                            "joined_at": existing_group.joined_at
+                        }
+                    }
+                else:
+                    # Yeni grup oluştur
+                    new_group = Group(
+                        user_id=self.user_id,
+                        session_id=session_id,
+                        group_id=entity.id,
+                        group_name=entity.title,
+                        username=entity.username if hasattr(entity, 'username') else None,
+                        type=None,  # Tip bilgisi sonradan belirlenebilir
+                        members_count=members_count,
+                        joined_at=joined_at,
+                        is_active=True,
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow()
+                    )
+                    self.db.add(new_group)
+                    self.db.commit()
+                    
+                    logger.info(f"User {self.user_id} - Session {session_id} - Grup {entity.title} katıldı.")
+                    
+                    await client.disconnect()
+                    return {
+                        "success": True,
+                        "message": f"{entity.title} grubuna başarıyla katıldınız.",
+                        "group_data": {
+                            "id": entity.id,
+                            "title": entity.title,
+                            "username": entity.username if hasattr(entity, 'username') else None,
+                            "members_count": members_count,
+                            "joined_at": joined_at
+                        }
+                    }
+            
+            except UserAlreadyParticipantError:
+                # Zaten üye
+                try:
+                    # Grup bilgilerini almaya çalış
+                    entity = await client.get_entity(username)
+                    full_entity = await client(GetFullChannelRequest(channel=entity))
+                    members_count = full_entity.full_chat.participants_count if hasattr(full_entity.full_chat, 'participants_count') else None
+                    
+                    # Veritabanına kaydet (varsa güncelle)
+                    existing_group = self.db.query(Group).filter(
+                        Group.group_id == entity.id,
+                        Group.user_id == self.user_id,
+                        Group.session_id == session_id
+                    ).first()
+                    
+                    joined_at = datetime.utcnow()
+                    
+                    if existing_group:
+                        existing_group.group_name = entity.title
+                        existing_group.username = entity.username if hasattr(entity, 'username') else None
+                        existing_group.members_count = members_count
+                        existing_group.is_active = True
+                        existing_group.updated_at = datetime.utcnow()
+                        joined_at = existing_group.joined_at
+                    else:
+                        # Yeni grup oluştur
+                        new_group = Group(
+                            user_id=self.user_id,
+                            session_id=session_id,
+                            group_id=entity.id,
+                            group_name=entity.title,
+                            username=entity.username if hasattr(entity, 'username') else None,
+                            type=None,  # Tip bilgisi sonradan belirlenebilir
+                            members_count=members_count,
+                            joined_at=joined_at,
+                            is_active=True,
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow()
+                        )
+                        self.db.add(new_group)
+                    
+                    self.db.commit()
+                    
+                    await client.disconnect()
+                    return {
+                        "success": True,
+                        "message": f"Zaten {entity.title} grubuna üyesiniz.",
+                        "group_data": {
+                            "id": entity.id,
+                            "title": entity.title,
+                            "username": entity.username if hasattr(entity, 'username') else None,
+                            "members_count": members_count,
+                            "joined_at": joined_at
+                        }
+                    }
+                except Exception as e:
+                    await client.disconnect()
+                    logger.error(f"Grup bilgisi alma hatası: {str(e)}")
+                    return {
+                        "success": False,
+                        "message": f"Gruba zaten üye olduğunuz halde grup bilgileri alınamadı: {str(e)}"
+                    }
+            
+            except Exception as e:
+                await client.disconnect()
+                logger.error(f"Gruba katılma hatası: {str(e)}")
+                return {
+                    "success": False,
+                    "message": f"Gruba katılırken bir hata oluştu: {str(e)}"
+                }
+                
+        except Exception as e:
+            logger.error(f"Genel hata: {str(e)}")
+            return {
+                "success": False,
+                "message": f"İşlem sırasında bir hata oluştu: {str(e)}"
+            }

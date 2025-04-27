@@ -1,7 +1,14 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
 from datetime import datetime
+import enum
+
+class SubscriptionPlan(str, enum.Enum):
+    STARTER = "starter"
+    PRO = "pro"
+    BUSINESS = "business"
+    ENTERPRISE = "enterprise"
 
 class User(Base):
     __tablename__ = "users"
@@ -11,10 +18,15 @@ class User(Base):
     api_id = Column(Integer)
     api_hash = Column(String)
     session_file = Column(String, nullable=True)
+    session_string = Column(String, nullable=True)  # Telethon session string
     is_active = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     verified_at = Column(DateTime, nullable=True)
     last_login = Column(DateTime, nullable=True)
+    
+    # Abonelik planı ve limitler
+    plan = Column(SQLEnum(SubscriptionPlan), default=SubscriptionPlan.STARTER)
+    max_sessions = Column(Integer, default=1)
     
     # Otomatik bot başlatma ayarları
     auto_start_bots = Column(Boolean, default=True)
@@ -40,6 +52,7 @@ class User(Base):
     tasks = relationship("Task", back_populates="user")
     target_users = relationship("TargetUser", back_populates="owner")
     auto_reply_rules = relationship("AutoReplyRule", back_populates="user")
+    telegram_sessions = relationship("TelegramSession", back_populates="user")
     
     def __repr__(self):
         return f"<User {self.phone}>" 

@@ -24,6 +24,7 @@ from .message_template import MessageTemplate
 from .message_log import MessageLog
 from .target_user import TargetUser
 from .auto_reply import AutoReplyRule
+from .telegram_session import TelegramSession
 
 # User model (with relationships to all other models)
 from .user import User
@@ -33,5 +34,5 @@ __all__ = [
     "User", "Group", "MessageTemplate", "MessageLog", "TargetUser", "AutoReplyRule",
     "License", "Message", "Template", "Log", "Settings", "Statistics", 
     "Payment", "Subscription", "Blacklist", "Schedule", "Analytics", 
-    "Notification", "Backup", "ApiKey", "Task"
+    "Notification", "Backup", "ApiKey", "Task", "TelegramSession"
 ] 

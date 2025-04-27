@@ -1,8 +1,8 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi.openapi.utils import get_openapi
-from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import JSONResponse
@@ -11,16 +11,22 @@ from sqlalchemy.orm import Session
 import uvicorn
 import asyncio
 import json
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 
-from app.database import SessionLocal, engine, Base
-from app.routers import auth, groups, messages, logs, auto_reply, message_template, scheduler
+from app.database import SessionLocal, engine, Base, get_db
+from app.routers import auth, groups, messages, logs, auto_reply, message_template, scheduler, dashboard, admin, telegram_auth, telegram_sessions, telegram_groups
 from app.services.scheduled_messaging import get_scheduled_messaging_service
 from app.config import settings
 from app.api.v1.endpoints import router as api_router
 from app.services.telegram_service import TelegramService
 from app.core.websocket import websocket_manager
+from app.models.user import User
+from app.models.message import Message
+from app.models.group import Group
+from app.models.template import Template
+from app.models.task import Task, TaskStatus
+from app.models.schedule import Schedule, ScheduleStatus
 
 # Prometheus metrik izleme için yeni eklemeler
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -92,7 +98,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_url="/openapi.json",
     lifespan=lifespan
 )
 
@@ -171,6 +177,11 @@ app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 app.include_router(auto_reply.router, tags=["Auto Reply"])
 app.include_router(message_template.router, prefix="/api/message-templates", tags=["Message Templates"])
 app.include_router(scheduler.router, tags=["Scheduler"])
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(admin.router)
+app.include_router(telegram_auth.router)  # Yeni router
+app.include_router(telegram_sessions.router, prefix="/api/telegram-sessions", tags=["Telegram Sessions"])  # Yeni telegram sessions router
+app.include_router(telegram_groups.router)  # Telegram grupları router'ı
 
 # Veritabanı bağımlılığı
 def get_db():
@@ -183,8 +194,6 @@ def get_db():
 # Tüm kullanıcılar için Telegram handler'larını başlat
 async def start_telegram_handlers_for_all_users(db: Session):
     """Tüm aktif kullanıcılar için Telegram event handler'larını başlatır"""
-    from app.models.user import User
-    
     try:
         # Aktif kullanıcıları al
         active_users = db.query(User).filter(User.is_active == True).all()
@@ -306,6 +315,161 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket_manager.disconnect(websocket, client_id)
         except:
             pass
+
+# Doğrudan endpoint tanımlamaları
+@app.get("/api/dashboard/stats", response_model=Dict[str, Any])
+async def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Kullanıcı için dashboard istatistikleri döndürür.
+    """
+    # Bugün ve dün için tarih aralığı
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday = today - timedelta(days=1)
+    
+    # Mesaj sayıları
+    message_count = db.query(Message).filter(
+        Message.user_id == current_user.id
+    ).count()
+    
+    today_message_count = db.query(Message).filter(
+        Message.user_id == current_user.id,
+        Message.created_at >= today
+    ).count()
+    
+    yesterday_message_count = db.query(Message).filter(
+        Message.user_id == current_user.id,
+        Message.created_at >= yesterday,
+        Message.created_at < today
+    ).count()
+    
+    # Grup sayıları
+    group_count = db.query(Group).filter(
+        Group.user_id == current_user.id
+    ).count()
+    
+    active_group_count = db.query(Group).filter(
+        Group.user_id == current_user.id,
+        Group.is_active == True
+    ).count()
+    
+    # Şablon sayıları
+    template_count = db.query(Template).filter(
+        Template.user_id == current_user.id
+    ).count()
+    
+    active_template_count = db.query(Template).filter(
+        Template.user_id == current_user.id,
+        Template.is_active == True
+    ).count()
+    
+    # Görev sayıları
+    pending_tasks = db.query(Task).filter(
+        Task.user_id == current_user.id,
+        Task.status == TaskStatus.PENDING
+    ).count()
+    
+    completed_tasks = db.query(Task).filter(
+        Task.user_id == current_user.id,
+        Task.status == TaskStatus.COMPLETED
+    ).count()
+    
+    failed_tasks = db.query(Task).filter(
+        Task.user_id == current_user.id,
+        Task.status == TaskStatus.FAILED
+    ).count()
+    
+    # Zamanlama sayıları
+    active_schedules = db.query(Schedule).filter(
+        Schedule.user_id == current_user.id,
+        Schedule.is_active == True
+    ).count()
+    
+    # Başarı oranı
+    success_rate = 0
+    if message_count > 0:
+        success_count = db.query(Message).filter(
+            Message.user_id == current_user.id,
+            Message.status == "sent"  # Başarılı durum
+        ).count()
+        success_rate = round((success_count / message_count) * 100, 2)
+    
+    # Grafik verisi (basitleştirilmiş)
+    graph_data = {
+        "daily": [
+            {"date": (today - timedelta(days=i)).strftime("%Y-%m-%d"), 
+             "count": db.query(Message).filter(
+                 Message.user_id == current_user.id,
+                 Message.created_at >= (today - timedelta(days=i)),
+                 Message.created_at < (today - timedelta(days=i-1))
+             ).count()} 
+            for i in range(7)
+        ],
+    }
+    
+    # Son aktivite
+    last_message = db.query(Message).filter(
+        Message.user_id == current_user.id
+    ).order_by(Message.created_at.desc()).first()
+    
+    last_activity = None
+    if last_message:
+        last_activity = last_message.created_at.isoformat()
+    
+    return {
+        "messages": {
+            "total": message_count,
+            "today": today_message_count,
+            "yesterday": yesterday_message_count,
+            "growth": calculate_growth(today_message_count, yesterday_message_count)
+        },
+        "groups": {
+            "total": group_count,
+            "active": active_group_count
+        },
+        "templates": {
+            "total": template_count,
+            "active": active_template_count
+        },
+        "tasks": {
+            "pending": pending_tasks,
+            "completed": completed_tasks,
+            "failed": failed_tasks
+        },
+        "schedules": {
+            "active": active_schedules
+        },
+        "performance": {
+            "success_rate": success_rate
+        },
+        "activity": {
+            "last_activity": last_activity
+        },
+        "graph_data": graph_data
+    }
+
+def calculate_growth(current, previous):
+    """Büyüme oranını hesaplar"""
+    if previous == 0:
+        return 100 if current > 0 else 0
+    
+    growth = ((current - previous) / previous) * 100
+    return round(growth, 2)
+
+# Mevcut kullanıcıyı getir
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    from app.services.auth_service import AuthService
+    auth_service = AuthService(db)
+    user = auth_service.get_current_user(token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçersiz kimlik bilgileri",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 # Geliştirme sunucusunu çalıştır
 if __name__ == "__main__":
