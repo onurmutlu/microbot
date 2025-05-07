@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, BigInteger
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 
 class TargetUser(Base):
@@ -9,7 +9,7 @@ class TargetUser(Base):
     id = Column(Integer, primary_key=True, index=True)
     owner_id = Column(Integer, ForeignKey("users.id"))
     telegram_user_id = Column(BigInteger, index=True)
-    group_id = Column(Integer, ForeignKey("groups.telegram_id"))
+    group_id = Column(Integer, ForeignKey("groups.id"))
     username = Column(String, nullable=True)
     full_name = Column(String, nullable=True)
     is_dm_sent = Column(Boolean, default=False)

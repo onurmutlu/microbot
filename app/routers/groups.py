@@ -24,10 +24,10 @@ async def get_groups(db: Session = Depends(get_db), current_user: User = Depends
     
     # Güncel grupları getir
     groups = db.query(Group).filter(Group.user_id == current_user.id).all()
-    return groups
+    return {"success": True, "message": "Groups retrieved successfully", "data": groups}
 
 @router.post("/select")
 async def select_groups(data: GroupSelect, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     telegram_service = TelegramService(db, current_user.id)
     result = await telegram_service.select_groups(data.group_ids)
-    return result
+    return {"success": True, "message": "Groups selected successfully", "data": result}

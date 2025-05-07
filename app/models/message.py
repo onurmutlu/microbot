@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Enum, JSON, BigInteger
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 import enum
 
@@ -25,7 +25,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     group_id = Column(Integer, ForeignKey("groups.id"))
-    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True)
+    template_id = Column(Integer, ForeignKey("message_templates.id"), nullable=True)
     telegram_message_id = Column(BigInteger, nullable=True)
     type = Column(Enum(MessageType), default=MessageType.TEXT)
     status = Column(Enum(MessageStatus), default=MessageStatus.PENDING)
@@ -45,7 +45,7 @@ class Message(Base):
     # İlişkiler
     user = relationship("User", back_populates="messages")
     group = relationship("Group", back_populates="messages")
-    template = relationship("Template", back_populates="messages")
+    template = relationship("MessageTemplate", back_populates="messages")
     
     def __repr__(self):
         return f"<Message {self.id} - {self.status.value}>" 

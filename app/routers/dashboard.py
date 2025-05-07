@@ -6,12 +6,15 @@ from app.database import get_db
 from app.models.user import User
 from app.models.message import Message
 from app.models.group import Group
-from app.models.template import Template
+from app.models.message_template import MessageTemplate
 from app.models.task import Task, TaskStatus
 from app.models.schedule import Schedule, ScheduleStatus
 from fastapi.security import OAuth2PasswordBearer
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["dashboard"]
+)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
@@ -69,13 +72,13 @@ async def get_dashboard_stats(
     ).count()
     
     # Şablon sayıları
-    template_count = db.query(Template).filter(
-        Template.user_id == current_user.id
+    template_count = db.query(MessageTemplate).filter(
+        MessageTemplate.user_id == current_user.id
     ).count()
     
-    active_template_count = db.query(Template).filter(
-        Template.user_id == current_user.id,
-        Template.is_active == True
+    active_template_count = db.query(MessageTemplate).filter(
+        MessageTemplate.user_id == current_user.id,
+        MessageTemplate.is_active == True
     ).count()
     
     # Görev sayıları

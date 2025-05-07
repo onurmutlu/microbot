@@ -5,7 +5,7 @@ from typing import Optional, List
 class Settings(BaseSettings):
     # Proje ismi
     PROJECT_NAME: str = "MicroBot API"
-    VERSION: str = "0.1.0"
+    VERSION: str = "1.5.0"
     API_V1_STR: str = "/api/v1"
     
     API_ID: int = 12345  # Varsayılan değer
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     POSTGRES_PORT: Optional[str] = "5432"
     
     # API güvenlik ayarları
-    CORS_ORIGINS: List[str] = ["*"]
+    CORS_ORIGINS: List[str] = ["*", "http://localhost:5173", "https://i.pravatar.cc"]
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]

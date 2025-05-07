@@ -2,6 +2,61 @@
 
 Bu proje, [Semantik Sürümleme](https://semver.org/lang/tr/) kurallarını takip etmektedir.
 
+## [1.5.0] - 2024-05-19
+
+### WebSocket Manager Performans Optimizasyonu
+- ConnectionStore sınıfı ile bağlantı yönetimi iyileştirildi
+- Eşzamanlı broadcast işlemleri için semaphore kullanımı eklendi
+- Aktif kullanıcı bağlantıları gruplandırılarak yönetimi kolaylaştırıldı
+- Eski ve geçersiz bağlantılar otomatik temizleme mekanizması eklendi
+- WebSocket mesaj gönderimi için toplu işlem mekanizması geliştirildi
+
+### Gelişmiş Hata Raporlama Sistemi
+- Kategori ve şiddet seviyesine göre hata sınıflandırma eklendi
+- Hata rapor istatistikleri ve zaman içindeki hata trendleri takibi
+- Özelleştirilebilir bildirim işleyicileri (logging, webhook) desteği
+- Hata çözümleme ve izleme süreci iyileştirildi
+- Otomatik dosyaya kaydetme ve yükleme mekanizması eklendi
+
+### Otomatik Yeniden Bağlanma Algoritması
+- Farklı bağlanma stratejileri eklendi (üstel, Fibonacci, doğrusal, rastgele, sabit)
+- Bağlantı durumu izleme ve istatistik toplama mekanizması geliştirildi
+- Akıllı geri çekilme (backoff) süresi hesaplama eklendi
+- Bağlantı geçmişi ve sorun izleme yetenekleri eklendi
+- API üzerinden bağlantı stratejisi değiştirme desteği eklendi
+
+### API Geliştirmeleri
+- Sistem durum sayfası güncellendi ve yeni metrikler eklendi
+- WebSocket bağlantı istatistikleri için endpoint'ler eklendi
+- Hata raporları ve hata istatistikleri için API desteği
+- Yeniden bağlanma durumu izleme ve yönetim API'leri eklendi
+- API dokümantasyonu güncellendi
+
+### Altyapı Geliştirmeleri
+- WebSocket Manager başlatma hatası düzeltildi
+- Versiyon numarası güncellendi (1.4.0 -> 1.5.0)
+- Dokümantasyon güncellemeleri yapıldı
+- ROADMAP.md'de tamamlanan maddeler işaretlendi
+
+## [1.4.1] - 2024-05-10
+
+### Geliştirmeler
+- WebSocket Manager başlatma hatası düzeltildi
+- Versiyon numarası güncellendi (0.1.0 -> 1.4.0)
+- Dokümantasyon güncellemeleri yapıldı
+- Docker kurulumları iyileştirildi
+
+### Hata Düzeltmeleri
+- WebSocket bağlantı yönetimi sorunları giderildi
+- Zaman ayarlı mesaj gönderimi hatası düzeltildi
+- Token yenileme işlemlerindeki sorunlar giderildi
+- Veritabanı bağlantı havuzu optimizasyonu
+
+### Güvenlik İyileştirmeleri
+- JWT token güvenliği artırıldı
+- API erişim kontrollerindeki güvenlik açıkları kapatıldı
+- Rate limiting kuralları güncellendi
+
 ## [1.4.0] - 2024-04-27
 
 ### Gelişmiş Otomatik Yanıt Sistemi

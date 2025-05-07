@@ -1,34 +1,208 @@
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, status
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
+import json
+import asyncio
 from datetime import datetime, timedelta
-from app.db.session import SessionLocal
+from app.database import SessionLocal, get_db
 from app.models.group import Group
 from app.models.user import User
 from app.models.message import Message
-from app.models.template import Template
+from app.models.message_template import MessageTemplate
 from app.models.task import Task, TaskStatus
 from app.models.schedule import Schedule, ScheduleStatus
 from app.core.websocket import websocket_manager
+from app.services.sse_manager import sse_manager
 from app.schemas.group import GroupCreate, GroupUpdate, GroupResponse
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
+from app.services.auth_service import AuthService, get_current_user
+from app.core.logging import logger
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
-# Dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Dependency - Redundant, using app.database.get_db instead
+# def get_db():
+#    db = SessionLocal()
+#    try:
+#        yield db
+#    finally:
+#        db.close()
 
 # WebSocket endpoint
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await websocket_manager.handle_websocket(websocket, client_id)
+
+# Server-Sent Events (SSE) endpoint
+@router.get("/sse/{client_id}")
+async def sse_endpoint(client_id: str):
+    """Server-Sent Events (SSE) bağlantısını yönetir"""
+    
+    async def event_generator():
+        """SSE için event verisi üreten generator"""
+        try:
+            # Bağlantı kurulduğunda başlangıç mesajı gönder
+            logger.info(f"SSE bağlantısı kuruldu: {client_id}")
+            yield f"data: {json.dumps({'type': 'connection', 'client_id': client_id, 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            # Message queue oluştur
+            message_queue = asyncio.Queue()
+            
+            # SSE Manager'e kaydol
+            await sse_manager.connect(client_id, message_queue)
+            
+            try:
+                # Ping mesajı göndermek için task oluştur
+                async def send_ping():
+                    while True:
+                        try:
+                            await asyncio.sleep(30)  # 30 saniyede bir ping gönder
+                            await message_queue.put({
+                                "type": "ping",
+                                "timestamp": datetime.now().isoformat()
+                            })
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            logger.error(f"SSE ping hatası: {str(e)}")
+                
+                # Ping task'ını başlat
+                ping_task = asyncio.create_task(send_ping())
+                
+                # Mesajları dinlemeye başla
+                while True:
+                    # Queue'dan mesaj al
+                    message = await message_queue.get()
+                    
+                    # Mesajı gönder
+                    yield f"data: {json.dumps(message)}\n\n"
+                    
+                    # Queue işlemi tamamlandı
+                    message_queue.task_done()
+                    
+            except asyncio.CancelledError:
+                logger.info(f"SSE bağlantısı kapatıldı: {client_id}")
+            except Exception as e:
+                logger.error(f"SSE akış hatası: {str(e)}")
+            finally:
+                # Temizlik işlemleri
+                ping_task.cancel()
+                await sse_manager.disconnect(client_id)
+                logger.info(f"SSE bağlantısı sonlandırıldı: {client_id}")
+        
+        except Exception as e:
+            logger.error(f"SSE generator hatası: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'timestamp': datetime.now().isoformat()})}\n\n"
+    
+    # SSE response döndür
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # NGINX için buffering'i devre dışı bırak
+        }
+    )
+
+# SSE için mesaj broadcast endpoint'i
+@router.post("/sse/broadcast")
+async def broadcast_message(message: Dict[str, Any]):
+    """Tüm SSE istemcilerine mesaj yayınlar"""
+    try:
+        # Mesajı tüm SSE istemcilerine yayınla
+        await sse_manager.broadcast({
+            "type": "broadcast",
+            "content": message,
+            "timestamp": datetime.now().isoformat()
+        })
+        return {
+            "success": True,
+            "message": "Mesaj başarıyla yayınlandı",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"SSE broadcast hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Mesaj yayınlama hatası: {str(e)}"
+        )
+
+# SSE için konuya abone olma endpoint'i
+@router.post("/sse/subscribe/{client_id}/{topic}")
+async def subscribe_to_topic(client_id: str, topic: str):
+    """Bir istemciyi belirli bir konuya abone eder"""
+    try:
+        success = await sse_manager.subscribe(client_id, topic)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"İstemci bulunamadı veya abone olunamadı: {client_id}"
+            )
+        return {
+            "success": True,
+            "message": f"İstemci {topic} konusuna abone oldu",
+            "data": {
+                "client_id": client_id,
+                "topic": topic,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SSE abonelik hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Abonelik hatası: {str(e)}"
+        )
+
+# SSE için konuya mesaj yayınlama endpoint'i
+@router.post("/sse/publish/{topic}")
+async def publish_to_topic(topic: str, message: Dict[str, Any]):
+    """Belirli bir konuya abone olan tüm istemcilere mesaj yayınlar"""
+    try:
+        recipient_count = await sse_manager.publish_to_topic(topic, {
+            "type": "topic_message",
+            "content": message,
+            "timestamp": datetime.now().isoformat()
+        })
+        return {
+            "success": True,
+            "message": f"Mesaj başarıyla {recipient_count} alıcıya yayınlandı",
+            "data": {
+                "topic": topic,
+                "recipients": recipient_count,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"SSE konu yayınlama hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Konu yayınlama hatası: {str(e)}"
+        )
+
+# SSE istatistikleri endpoint'i
+@router.get("/sse/stats")
+async def get_sse_stats():
+    """SSE yöneticisi hakkında istatistikler döndürür"""
+    try:
+        stats = sse_manager.get_stats()
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"SSE istatistik hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"İstatistik alma hatası: {str(e)}"
+        )
 
 # Group endpoints
 @router.post("/groups/", response_model=GroupResponse)
@@ -114,13 +288,13 @@ async def get_dashboard_stats(
     ).count()
     
     # Şablon sayıları
-    template_count = db.query(Template).filter(
-        Template.user_id == current_user.id
+    template_count = db.query(MessageTemplate).filter(
+        MessageTemplate.user_id == current_user.id
     ).count()
     
-    active_template_count = db.query(Template).filter(
-        Template.user_id == current_user.id,
-        Template.is_active == True
+    active_template_count = db.query(MessageTemplate).filter(
+        MessageTemplate.user_id == current_user.id,
+        MessageTemplate.is_active == True
     ).count()
     
     # Görev sayıları
@@ -218,9 +392,7 @@ def calculate_growth(current, previous):
 
 # Mevcut kullanıcıyı getir
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    from app.services.auth_service import AuthService
-    auth_service = AuthService(db)
-    user = auth_service.get_current_user(token)
+    user = AuthService.get_current_user(db, token)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

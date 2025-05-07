@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server-Sent Events (SSE) Test Sayfası - DEPRECATED</title>
+    <script src="/static/js/sse_client.js"></script>
+    <script src="/static/js/toast.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.6;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .connecting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        button {
+            padding: 8px 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #0069d9;
+        }
+        #messagesContainer {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+            background-color: #f9f9f9;
+        }
+        #messagesContainer p {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        #messagesContainer p:nth-child(odd) {
+            background-color: #f0f0f0;
+        }
+        input, select {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .deprecated-warning {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            border: 1px solid #f5c6cb;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="deprecated-warning">
+            <h2>⚠️ BU SAYFA KULLANIM DIŞIDIR ⚠️</h2>
+            <p>Bu test sayfası artık kullanımdan kaldırılmıştır. SSE istemci kodları frontend projesinin bir parçası olmalıdır, backend API projesinin değil.</p>
+            <p>Bu sayfa sadece test amaçlı olarak tutulmaktadır ve yakında tamamen kaldırılacaktır.</p>
+        </div>
+        
+        <h1>SSE Test Sayfası</h1>
+        
+        <div class="card">
+            <h2>Bağlantı Durumu</h2>
+            <div id="connection-status" class="status disconnected">Bağlantı yok</div>
+            <div>
+                <button id="connect-btn">Bağlan</button>
+                <button id="disconnect-btn" disabled>Bağlantıyı Kes</button>
+            </div>
+            <div class="form-group">
+                <label for="clientId">Client ID (Opsiyonel):</label>
+                <input type="text" id="clientId" placeholder="Boş bırakırsanız rastgele oluşturulur">
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Konu Aboneliği</h2>
+            <div class="form-group">
+                <label for="topic">Abone Olunacak Konu:</label>
+                <input type="text" id="topic" placeholder="Örn: notifications">
+            </div>
+            <button id="subscribe-btn" disabled>Abone Ol</button>
+        </div>
+        
+        <div class="card">
+            <h2>Mesaj Gönder</h2>
+            <div class="form-group">
+                <label for="messageType">Mesaj Türü:</label>
+                <select id="messageType">
+                    <option value="broadcast">Broadcast (Herkese)</option>
+                    <option value="topic">Konuya</option>
+                </select>
+            </div>
+            
+            <div class="form-group topic-field" style="display: none;">
+                <label for="messageTopic">Mesaj Konusu:</label>
+                <input type="text" id="messageTopic" placeholder="Örn: notifications">
+            </div>
+            
+            <div class="form-group">
+                <label for="messageContent">Mesaj İçeriği:</label>
+                <input type="text" id="messageContent" placeholder="JSON olarak mesaj içeriği yazın">
+            </div>
+            
+            <button id="send-btn" disabled>Gönder</button>
+        </div>
+        
+        <div class="card">
+            <h2>Alınan Mesajlar</h2>
+            <div id="messagesContainer"></div>
+            <button id="clear-btn">Temizle</button>
+        </div>
+    </div>
+
+    <script>
+        // DOM elementleri
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const subscribeBtn = document.getElementById('subscribe-btn');
+        const sendBtn = document.getElementById('send-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const clientIdInput = document.getElementById('clientId');
+        const topicInput = document.getElementById('topic');
+        const messageTypeSelect = document.getElementById('messageType');
+        const messageTopicInput = document.getElementById('messageTopic');
+        const messageContentInput = document.getElementById('messageContent');
+        const connectionStatus = document.getElementById('connection-status');
+        const messagesContainer = document.getElementById('messagesContainer');
+        
+        // Global değişkenler
+        let sseClient = null;
+        let clientId = '';
+        
+        // Mesaj türü seçimine göre konu alanını göster/gizle
+        messageTypeSelect.addEventListener('change', function() {
+            const topicField = document.querySelector('.topic-field');
+            if (this.value === 'topic') {
+                topicField.style.display = 'block';
+            } else {
+                topicField.style.display = 'none';
+            }
+        });
+        
+        // Bağlan butonu
+        connectBtn.addEventListener('click', async function() {
+            try {
+                // Client ID oluştur veya kullanıcının girdiğini kullan
+                clientId = clientIdInput.value || 'user_' + Math.random().toString(36).substring(2, 10);
+                clientIdInput.value = clientId;
+                
+                // SSE bağlantısını başlat
+                sseClient = new SSEClient(`/api/sse`, {
+                    autoReconnect: true,
+                    reconnectDelay: 2000,
+                    maxReconnectAttempts: 5
+                });
+                
+                // Bağlantı durumu değişikliklerini dinle
+                sseClient.onConnectionState('open', function() {
+                    connectionStatus.textContent = 'Bağlı';
+                    connectionStatus.className = 'status connected';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    subscribeBtn.disabled = false;
+                    sendBtn.disabled = false;
+                    addMessage('Sistem', 'SSE bağlantısı açıldı');
+                });
+                
+                sseClient.onConnectionState('error', function(error) {
+                    connectionStatus.textContent = 'Bağlantı hatası';
+                    connectionStatus.className = 'status disconnected';
+                    addMessage('Hata', 'SSE bağlantı hatası: ' + JSON.stringify(error));
+                });
+                
+                sseClient.onConnectionState('close', function() {
+                    connectionStatus.textContent = 'Bağlantı kesildi';
+                    connectionStatus.className = 'status disconnected';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    subscribeBtn.disabled = true;
+                    sendBtn.disabled = true;
+                    addMessage('Sistem', 'SSE bağlantısı kapatıldı');
+                });
+                
+                // Genel mesajları dinle
+                sseClient.on('message', function(data) {
+                    addMessage('Mesaj', JSON.stringify(data));
+                });
+                
+                // Ping mesajlarını dinle (sadece logla)
+                sseClient.on('ping', function(data) {
+                    console.log('Ping:', data);
+                });
+                
+                // Broadcast mesajlarını dinle
+                sseClient.on('broadcast', function(data) {
+                    addMessage('Broadcast', JSON.stringify(data));
+                });
+                
+                // Bağlantı mesajlarını dinle
+                sseClient.on('connection', function(data) {
+                    clientId = data.client_id || clientId;
+                    clientIdInput.value = clientId;
+                    addMessage('Bağlantı', 'Client ID: ' + clientId);
+                });
+                
+                // Bağlantıyı başlat
+                connectionStatus.textContent = 'Bağlanıyor...';
+                connectionStatus.className = 'status connecting';
+                await sseClient.connect();
+                
+            } catch (error) {
+                connectionStatus.textContent = 'Bağlantı hatası';
+                connectionStatus.className = 'status disconnected';
+                addMessage('Hata', 'Bağlantı hatası: ' + error.message);
+                console.error('Bağlantı hatası:', error);
+            }
+        });
+        
+        // Bağlantıyı kes butonu
+        disconnectBtn.addEventListener('click', function() {
+            if (sseClient) {
+                sseClient.disconnect();
+                sseClient = null;
+            }
+        });
+        
+        // Abone ol butonu
+        subscribeBtn.addEventListener('click', async function() {
+            if (!sseClient || !sseClient.isConnectionActive()) {
+                addMessage('Hata', 'Önce bağlantı kurmalısınız');
+                return;
+            }
+            
+            const topic = topicInput.value.trim();
+            if (!topic) {
+                addMessage('Hata', 'Lütfen bir konu adı girin');
+                return;
+            }
+            
+            try {
+                // Konuya abone ol
+                await sseClient.subscribeTopic(topic);
+                
+                // Konuya abone ol ve dinle
+                sseClient.onTopic(topic, function(data) {
+                    addMessage(`Konu: ${topic}`, JSON.stringify(data));
+                });
+                
+                addMessage('Sistem', `${topic} konusuna abone olundu`);
+            } catch (error) {
+                addMessage('Hata', 'Abonelik hatası: ' + error.message);
+                console.error('Abonelik hatası:', error);
+            }
+        });
+        
+        // Mesaj gönder butonu
+        sendBtn.addEventListener('click', async function() {
+            if (!sseClient || !sseClient.isConnectionActive()) {
+                addMessage('Hata', 'Önce bağlantı kurmalısınız');
+                return;
+            }
+            
+            const messageType = messageTypeSelect.value;
+            const content = messageContentInput.value.trim();
+            
+            if (!content) {
+                addMessage('Hata', 'Lütfen bir mesaj içeriği girin');
+                return;
+            }
+            
+            try {
+                let messageContent;
+                try {
+                    // JSON olarak parse etmeyi dene
+                    messageContent = JSON.parse(content);
+                } catch (e) {
+                    // JSON değilse metin olarak kullan
+                    messageContent = { text: content };
+                }
+                
+                if (messageType === 'broadcast') {
+                    // Broadcast mesajı gönder
+                    const response = await fetch('/api/sse/broadcast', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(messageContent)
+                    });
+                    
+                    const result = await response.json();
+                    addMessage('Gönderildi', 'Broadcast mesajı gönderildi: ' + JSON.stringify(result));
+                } else if (messageType === 'topic') {
+                    const topic = messageTopicInput.value.trim();
+                    if (!topic) {
+                        addMessage('Hata', 'Lütfen bir konu adı girin');
+                        return;
+                    }
+                    
+                    // Konuya mesaj gönder
+                    const response = await fetch(`/api/sse/publish/${topic}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(messageContent)
+                    });
+                    
+                    const result = await response.json();
+                    addMessage('Gönderildi', `${topic} konusuna mesaj gönderildi: ` + JSON.stringify(result));
+                }
+                
+                // Mesaj içeriğini temizle
+                messageContentInput.value = '';
+                
+            } catch (error) {
+                addMessage('Hata', 'Mesaj gönderme hatası: ' + error.message);
+                console.error('Mesaj gönderme hatası:', error);
+            }
+        });
+        
+        // Temizle butonu
+        clearBtn.addEventListener('click', function() {
+            messagesContainer.innerHTML = '';
+        });
+        
+        // Mesaj ekle
+        function addMessage(type, message) {
+            const messageElem = document.createElement('p');
+            
+            const timestamp = new Date().toLocaleTimeString();
+            messageElem.innerHTML = `<strong>[${timestamp}] ${type}:</strong> ${message}`;
+            
+            messagesContainer.appendChild(messageElem);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            // Toast bildirimi göster (toast.js yüklüyse)
+            if (typeof showToast === 'function') {
+                // Mesaj türüne göre toast türünü belirle
+                let toastType = 'info';
+                if (type.toLowerCase() === 'hata') toastType = 'error';
+                if (type.toLowerCase() === 'sistem') toastType = 'info';
+                if (type.toLowerCase() === 'broadcast') toastType = 'success';
+                if (type.toLowerCase() === 'gönderildi') toastType = 'success';
+                
+                // Toast göster
+                showToast(`${type}: ${message}`, toastType, {
+                    autoCloseDelay: 3000
+                });
+            }
+        }
+    </script>
+</body>
+</html> 

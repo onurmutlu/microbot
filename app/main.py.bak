@@ -1,0 +1,350 @@
+import os
+import logging
+from datetime import datetime, timedelta
+from fastapi.openapi.utils import get_openapi
+from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect, Path
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from sqlalchemy.orm import Session
+import uvicorn
+import asyncio
+import json
+from typing import List, Optional, Dict, Any
+from contextlib import asynccontextmanager
+import time
+
+from app.database import SessionLocal, engine, get_db
+from app.models.base import Base
+from app.routers import auth, groups, messages, logs, auto_reply, message_template, scheduler, dashboard
+from app.routers.telegram_auth import router as telegram_auth
+from app.routers.telegram_sessions import router as telegram_sessions
+from app.services.scheduled_messaging import get_scheduled_messaging_service
+from app.config import settings
+from app.api.v1.endpoints import router as api_router
+from app.services.telegram_service import TelegramService
+from app.core.websocket import websocket_manager
+from app.models.user import User
+from app.models.message import Message
+from app.models.group import Group
+from app.models.message_template import MessageTemplate
+from app.models.task import Task, TaskStatus
+from app.models.schedule import Schedule, ScheduleStatus
+from app.services.auth_service import get_current_user
+from app.core.logging import logger, get_logger
+from prometheus_fastapi_instrumentator import Instrumentator
+
+# Uygulama logger'ı
+logger = logging.getLogger("app.main")
+
+# Uvicorn logger'ları için ayarlar
+uvicorn_logger_names = ["uvicorn", "uvicorn.error", "uvicorn.access"]
+for logger_name in uvicorn_logger_names:
+    uvicorn_logger = logging.getLogger(logger_name)
+    uvicorn_logger.handlers = []  # Mevcut handler'ları temizle
+    uvicorn_logger.propagate = False  # Ana logger'a log gönderme
+
+# Websocket logger'ı
+websocket_logger = logging.getLogger("app")
+websocket_logger.handlers = logger.handlers  # Ana logger ile aynı handlerları kullan
+
+# Veritabanı tablolarını oluştur
+Base.metadata.create_all(bind=engine)
+
+# Aktif telegram service instance'larını tutacak dictionary
+active_telegram_instances: Dict[int, TelegramService] = {}
+active_schedulers: Dict[int, bool] = {}
+
+# Lifespan ile uygulama başlangıç ve bitiş olaylarını yönet
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup olayları burada gerçekleşir
+    try:
+        # Gerekli dizinleri oluştur
+        os.makedirs("logs", exist_ok=True)
+        os.makedirs("sessions", exist_ok=True)
+
+        # Veritabanı bağlantısını kontrol et
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text
+            db.execute(text("SELECT 1"))
+            logger.info("Veritabanı bağlantısı başarılı")
+            
+            # Aktif tüm kullanıcıların otomatik başlatması
+            await start_telegram_handlers_for_all_users(db)
+            
+        except Exception as e:
+            logger.error(f"Veritabanı bağlantı hatası: {str(e)}")
+        finally:
+            db.close()
+            
+        logger.info("Uygulama başlatıldı")
+    except Exception as e:
+        logger.error(f"Uygulama başlangıç hatası: {str(e)}")
+
+    yield  # Bu noktada FastAPI uygulaması çalışmaya devam eder
+
+    # Shutdown olayları burada gerçekleşir
+    try:
+        # Tüm zamanlayıcıları durdur
+        scheduler_service = get_scheduled_messaging_service(next(get_db()))
+        await scheduler_service.stop_all_schedulers()
+
+        # Tüm Telegram handler'larını durdur
+        await stop_all_telegram_handlers()
+        
+        logger.info("Uygulama düzgün şekilde kapatıldı")
+    except Exception as e:
+        logger.error(f"Uygulama kapatma hatası: {str(e)}")
+
+# FastAPI uygulamasını oluştur
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
+    description="MicroBot API"
+)
+
+# Prometheus metrikleri
+Instrumentator().instrument(app).expose(app)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+# Swagger'da Bearer token kutusu açılmasını sağlayan özel tanım
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+    }
+    for path in openapi_schema["paths"]:
+        for method in openapi_schema["paths"][path]:
+            openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# CORS ayarları
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# İstek işleme süresi middleware'i
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000
+    logger.info(
+        f"İstek: {request.method} {request.url.path} - "
+        f"İşlem süresi: {process_time:.2f}ms - "
+        f"Durum kodu: {response.status_code}"
+    )
+    return response
+
+# Hata işleyicileri
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    error_logger = get_logger("validation_error")
+    error_logger.error(f"Doğrulama hatası: {exc.errors()}")
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors(), "body": exc.body},
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    error_logger = get_logger("http_error")
+    error_logger.error(f"HTTP Hatası: {exc.status_code} - {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    error_logger = get_logger("general_error")
+    error_logger.exception(f"Beklenmeyen hata: {str(exc)}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Sunucu hatası, lütfen daha sonra tekrar deneyin."},
+    )
+
+# API router'ını ekle
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Router'ları ekle - özel prefixleri olanlar
+app.include_router(telegram_auth)  # Bu router kendi içinde /api/telegram prefix'ini içeriyor
+app.include_router(telegram_sessions)  # Bu router kendi içinde /api/telegram prefix'ini içeriyor
+app.include_router(scheduler)  # Bu router kendi içinde /api/scheduler prefix'ini içeriyor
+app.include_router(message_template)  # Bu router kendi içinde /api/message-templates prefix'ini içeriyor
+
+# Standart prefixli router'lar 
+app.include_router(auth, prefix=settings.API_V1_STR)
+app.include_router(groups, prefix=settings.API_V1_STR)
+app.include_router(messages, prefix=settings.API_V1_STR)
+app.include_router(logs, prefix=settings.API_V1_STR)
+app.include_router(auto_reply, prefix=settings.API_V1_STR)
+app.include_router(dashboard, prefix=settings.API_V1_STR)
+
+# Veritabanı bağımlılığı
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Tüm kullanıcılar için Telegram handler'larını başlat
+async def start_telegram_handlers_for_all_users(db: Session):
+    """Tüm aktif kullanıcılar için Telegram event handler'larını başlatır"""
+    try:
+        # Aktif kullanıcıları al
+        active_users = db.query(User).filter(User.is_active == True).all()
+        
+        if not active_users:
+            logger.info("Başlatılacak aktif kullanıcı bulunamadı")
+            return
+            
+        logger.info(f"{len(active_users)} aktif kullanıcı için Telegram handler'ları başlatılıyor")
+        
+        for user in active_users:
+            try:
+                # Kullanıcının ayarlarını kontrol et (auto_start_bots vs.)
+                # Not: Bu alan tablonuzda yoksa ekleyebilir veya her kullanıcı için başlatabilirsiniz
+                if not hasattr(user, 'auto_start_bots') or user.auto_start_bots:
+                    telegram_service = TelegramService(db, user.id)
+                    
+                    try:
+                        # Event handler'ları başlat
+                        await telegram_service.start_event_handlers()
+                        active_telegram_instances[user.id] = telegram_service
+                        logger.info(f"Kullanıcı {user.id} için Telegram handler'ları başlatıldı")
+                        
+                        # Auto-scheduling başlat
+                        if hasattr(user, 'auto_start_scheduling') and user.auto_start_scheduling:
+                            scheduler_service = get_scheduled_messaging_service(db)
+                            await scheduler_service.start_scheduler_for_user(user.id)
+                            active_schedulers[user.id] = True
+                            logger.info(f"Kullanıcı {user.id} için otomatik zamanlama başlatıldı")
+                    except Exception as e:
+                        logger.error(f"Kullanıcı {user.id} için handler başlatma hatası: {str(e)}")
+            except Exception as user_e:
+                logger.error(f"Kullanıcı {user.id} işlemesi sırasında hata: {str(user_e)}")
+    except Exception as e:
+        logger.error(f"Tüm kullanıcılar için handler başlatma hatası: {str(e)}")
+
+# Tüm Telegram handler'larını durdur
+async def stop_all_telegram_handlers():
+    """Tüm aktif Telegram event handler'larını durdurur"""
+    for user_id, telegram_service in active_telegram_instances.items():
+        try:
+            await telegram_service.stop_event_handlers()
+            logger.info(f"Kullanıcı {user_id} için Telegram handler'ları durduruldu")
+        except Exception as e:
+            logger.error(f"Kullanıcı {user_id} için handler durdurma hatası: {str(e)}")
+
+# Root endpoint
+@app.get("/")
+def root():
+    logger.info("Kök yoluna istek geldi")
+    return {"message": f"MicroBot API'ye Hoş Geldiniz! Belgelere /docs adresinden erişebilirsiniz."}
+
+# Sağlık kontrolü
+@app.get("/health", tags=["Health"])
+async def health_check():
+    # Aktif handler ve zamanlayıcı sayılarını da ekle
+    return {
+        "success": True,
+        "message": "Sistem sağlıklı",
+        "data": {
+            "status": "healthy",
+            "time": datetime.utcnow(),
+            "active_handlers": len(active_telegram_instances),
+            "active_schedulers": len(active_schedulers)
+        }
+    }
+
+# Sistem durumu
+@app.get("/system/status", tags=["System"])
+async def system_status():
+    return {
+        "success": True,
+        "message": "Sistem durumu",
+        "data": {
+            "active_telegram_instances": list(active_telegram_instances.keys()),
+            "active_schedulers": list(active_schedulers.keys()),
+            "server_time": datetime.utcnow()
+        }
+    }
+
+# Telegram handler'larını manuel yeniden başlatma
+@app.post("/system/restart-handlers", tags=["System"])
+async def restart_handlers():
+    try:
+        await stop_all_telegram_handlers()
+        db = SessionLocal()
+        try:
+            await start_telegram_handlers_for_all_users(db)
+            return {
+                "success": True,
+                "message": "Tüm handler'lar yeniden başlatıldı",
+                "data": {
+                    "active_instances": list(active_telegram_instances.keys())
+                }
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Handler yeniden başlatma hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Handler yeniden başlatma hatası: {str(e)}"
+        )
+
+# WebSocket endpoint
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    client_id = f"anonymous_{datetime.now().timestamp()}"
+    try:
+        await websocket_manager.connect(websocket, client_id)
+        await websocket.send_json({"type": "connection_established", "client_id": client_id})
+        
+        while True:
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                # Mesaj işleme
+                await websocket.send_json({"type": "message_received", "data": message})
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Geçersiz JSON formatı"})
+    except WebSocketDisconnect:
+        await websocket_manager.disconnect(websocket, client_id)
+    except Exception as e:
+        logger.error(f"WebSocket hatası: {str(e)}")
+        try:
+            await websocket_manager.disconnect(websocket, client_id)
+        except:
+            pass
+
+# Geliştirme sunucusunu çalıştır
+if __name__ == "__main__":
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

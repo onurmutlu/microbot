@@ -5,4 +5,5 @@ from app.routers.logs import router as logs
 from app.routers.auto_reply import router as auto_reply
 from app.routers.message_template import router as message_template
 from app.routers.scheduler import router as scheduler
-from app.routers.dashboard import router as dashboard 
+from app.routers.dashboard import router as dashboard
+from app.routers.telegram_auth import router as telegram_auth 

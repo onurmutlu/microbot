@@ -2,6 +2,8 @@
 
 Telegram gruplarını yönetmek için geliştirilmiş bir bot uygulaması.
 
+**Güncel Versiyon: v1.5.0** *(Bakınız: [CHANGELOG.md](CHANGELOG.md))*
+
 ## Özellikler
 
 - Telegram grup ve kullanıcı yönetimi
@@ -11,6 +13,10 @@ Telegram gruplarını yönetmek için geliştirilmiş bir bot uygulaması.
 - WebSocket tabanlı gerçek zamanlı veri senkronizasyonu
 - REST API
 - Kullanıcı ve grup hedefleme
+- Güvenlik optimizasyonları ve hata düzeltmeleri
+- Gelişmiş hata raporlama sistemi
+- Otomatik yeniden bağlanma stratejileri
+- Performans optimizasyonları
 
 ## Kurulum
 

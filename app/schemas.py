@@ -262,7 +262,7 @@ class ApiKeyResponse(ApiKeyBase):
     user_id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Kullanıcı Aktivitesi Şemaları
 class UserActivityBase(BaseModel):
@@ -281,7 +281,7 @@ class UserActivityResponse(UserActivityBase):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Sistem Durum Şeması
 class SystemStatus(BaseModel):

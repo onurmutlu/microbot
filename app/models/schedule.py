@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, JSON
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 import enum
 
@@ -23,7 +23,7 @@ class Schedule(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    template_id = Column(Integer, ForeignKey("templates.id"))
+    template_id = Column(Integer, ForeignKey("message_templates.id"))
     group_id = Column(Integer, ForeignKey("groups.id"))
     type = Column(Enum(ScheduleType))
     status = Column(Enum(ScheduleStatus), default=ScheduleStatus.PENDING)
@@ -42,7 +42,7 @@ class Schedule(Base):
     
     # İlişkiler
     user = relationship("User", back_populates="schedules")
-    template = relationship("Template", back_populates="schedules")
+    template = relationship("MessageTemplate", back_populates="schedules")
     group = relationship("Group", back_populates="schedules")
     
     def __repr__(self):

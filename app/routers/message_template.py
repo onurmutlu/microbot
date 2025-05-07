@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
@@ -8,7 +9,10 @@ from app.models import User, MessageTemplate
 from app.services.auth_service import get_current_active_user
 from app.crud import message_template as template_crud
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/api/message-templates",
+    tags=["templates"]
+)
 
 # Pydantic modelleri
 class MessageTemplateBase(BaseModel):
@@ -32,7 +36,7 @@ class MessageTemplateResponse(MessageTemplateBase):
     created_at: str
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 @router.get("", response_model=List[MessageTemplateResponse])
 async def get_message_templates(
@@ -45,7 +49,7 @@ async def get_message_templates(
         templates = template_crud.get_templates_by_type(db, current_user.id, message_type)
     else:
         templates = template_crud.get_templates_by_user(db, current_user.id)
-    return templates
+    return {"success": True, "message": "Templates retrieved successfully", "data": templates}
 
 @router.post("", response_model=MessageTemplateResponse, status_code=status.HTTP_201_CREATED)
 async def create_message_template(
@@ -64,7 +68,7 @@ async def create_message_template(
     
     Cron formatı örneği: "0 9 * * 1-5" (Hafta içi her gün saat 9'da)
     """
-    return template_crud.create_template(
+    new_template = template_crud.create_template(
         db=db,
         user_id=current_user.id,
         name=template.name,
@@ -72,6 +76,7 @@ async def create_message_template(
         interval_minutes=template.interval_minutes,
         cron_expression=template.cron_expression
     )
+    return {"success": True, "message": "Template created successfully", "data": new_template}
 
 @router.put("/{template_id}", response_model=MessageTemplateResponse)
 async def update_message_template(
@@ -93,9 +98,15 @@ async def update_message_template(
     # Şablonun kullanıcıya ait olup olmadığını kontrol et
     db_template = template_crud.get_template_by_id(db, template_id)
     if not db_template:
-        raise HTTPException(status_code=404, detail="Şablon bulunamadı")
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"success": False, "message": "Şablon bulunamadı", "data": {}}
+        )
     if db_template.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Bu şablona erişim izniniz yok")
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"success": False, "message": "Bu şablona erişim izniniz yok", "data": {}}
+        )
     
     # Şablonu güncelle
     updated_template = template_crud.update_template(
@@ -112,7 +123,7 @@ async def update_message_template(
         template_crud.update_template_status(db, template_id, template.is_active)
         updated_template = template_crud.get_template_by_id(db, template_id)
     
-    return updated_template
+    return {"success": True, "message": "Template updated successfully", "data": updated_template}
 
 @router.patch("/{template_id}/toggle", response_model=MessageTemplateResponse)
 async def toggle_template_status(
@@ -124,15 +135,15 @@ async def toggle_template_status(
     # Önce şablonun varlığını ve sahipliğini kontrol et
     existing_template = template_crud.get_template_by_id(db, template_id)
     if not existing_template:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Şablon bulunamadı"
+            content={"success": False, "message": "Şablon bulunamadı", "data": {}}
         )
     
     if existing_template.user_id != current_user.id:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu şablon üzerinde işlem yapamazsınız"
+            content={"success": False, "message": "Bu şablon üzerinde işlem yapamazsınız", "data": {}}
         )
     
     # Şablonun durumunu tersine çevir
@@ -142,7 +153,7 @@ async def toggle_template_status(
         template_id=template_id,
         is_active=new_status
     )
-    return updated_template
+    return {"success": True, "message": "Template status toggled successfully", "data": updated_template}
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_message_template(
@@ -154,21 +165,23 @@ async def delete_message_template(
     # Önce şablonun varlığını ve sahipliğini kontrol et
     existing_template = template_crud.get_template_by_id(db, template_id)
     if not existing_template:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Şablon bulunamadı"
+            content={"success": False, "message": "Şablon bulunamadı", "data": {}}
         )
     
     if existing_template.user_id != current_user.id:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu şablon üzerinde işlem yapamazsınız"
+            content={"success": False, "message": "Bu şablon üzerinde işlem yapamazsınız", "data": {}}
         )
     
     # Şablonu sil
     result = template_crud.delete_template(db, template_id)
     if not result:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Şablon silinirken bir hata oluştu"
-        ) 
+            content={"success": False, "message": "Şablon silinirken bir hata oluştu", "data": {}}
+        )
+    
+    return {"success": True, "message": "Template deleted successfully", "data": {}} 

@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 import enum
 
@@ -14,9 +14,14 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
-    phone = Column(String, unique=True, index=True)
-    api_id = Column(Integer)
-    api_hash = Column(String)
+    username = Column(String, unique=True, index=True, nullable=True)
+    password_hash = Column(String, nullable=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    photo_url = Column(String, nullable=True)
+    phone = Column(String, unique=True, index=True, nullable=True)
+    api_id = Column(Integer, nullable=True)
+    api_hash = Column(String, nullable=True)
     session_file = Column(String, nullable=True)
     session_string = Column(String, nullable=True)  # Telethon session string
     is_active = Column(Boolean, default=False)
@@ -36,7 +41,6 @@ class User(Base):
     licenses = relationship("License", back_populates="user")
     messages = relationship("Message", back_populates="user")
     groups = relationship("Group", back_populates="user")
-    templates = relationship("Template", back_populates="user")
     message_templates = relationship("MessageTemplate", back_populates="user")
     logs = relationship("Log", back_populates="user")
     settings = relationship("Settings", back_populates="user", uselist=False)
@@ -53,6 +57,7 @@ class User(Base):
     target_users = relationship("TargetUser", back_populates="owner")
     auto_reply_rules = relationship("AutoReplyRule", back_populates="user")
     telegram_sessions = relationship("TelegramSession", back_populates="user")
+    activities = relationship("UserActivity", back_populates="user")
     
     def __repr__(self):
         return f"<User {self.phone}>" 

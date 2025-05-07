@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import secrets
 import hashlib
@@ -54,25 +55,37 @@ def create_api_key(api_key: ApiKeyCreate, request: Request, db: Session = Depend
     
     # Yanıtta ham anahtarı göster (bir kez gösterilecek)
     return {
-        "id": db_api_key.id,
-        "name": db_api_key.name,
-        "key": raw_key,  # Sadece oluşturulduğunda bir kez gösterilir
-        "created_at": db_api_key.created_at,
-        "expires_at": db_api_key.expires_at,
-        "user_id": db_api_key.user_id
+        "success": True,
+        "message": "API key created successfully",
+        "data": {
+            "id": db_api_key.id,
+            "name": db_api_key.name,
+            "key": raw_key,  # Sadece oluşturulduğunda bir kez gösterilir
+            "created_at": db_api_key.created_at,
+            "expires_at": db_api_key.expires_at,
+            "user_id": db_api_key.user_id
+        }
     }
 
 @router.get("/api-keys", response_model=List[ApiKeyResponse])
 def get_api_keys(db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
     # Tüm API anahtarlarını getir
-    return db.query(ApiKey).all()
+    api_keys = db.query(ApiKey).all()
+    return {
+        "success": True,
+        "message": "API keys retrieved successfully",
+        "data": api_keys
+    }
 
 @router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_api_key(key_id: int, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
     # API anahtarını bul
     api_key = db.query(ApiKey).filter(ApiKey.id == key_id).first()
     if not api_key:
-        raise HTTPException(status_code=404, detail="API anahtarı bulunamadı")
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"success": False, "message": "API anahtarı bulunamadı", "data": {}}
+        )
     
     # Aktivite logla
     activity = UserActivity(
@@ -89,7 +102,11 @@ def delete_api_key(key_id: int, request: Request, db: Session = Depends(get_db),
     db.delete(api_key)
     db.commit()
     
-    return None
+    return {
+        "success": True,
+        "message": "API key deleted successfully",
+        "data": {}
+    }
 
 # Kullanıcı Aktivitesi İzleme
 @router.get("/user-activities", response_model=List[UserActivityResponse])
@@ -122,7 +139,11 @@ def get_user_activities(
     total = query.count()
     activities = query.order_by(UserActivity.created_at.desc()).offset(offset).limit(limit).all()
     
-    return activities
+    return {
+        "success": True,
+        "message": "User activities retrieved successfully",
+        "data": activities
+    }
 
 # Sistem Durum İzleme
 @router.get("/system-status")
@@ -144,19 +165,23 @@ def get_system_status(db: Session = Depends(get_db), current_user: User = Depend
     
     # Döndürülecek durum bilgisi
     return {
-        "users": {
-            "total": user_count,
-            "active": active_user_count
-        },
-        "api_keys": {
-            "total": api_keys_count,
-            "active": active_api_keys
-        },
-        "activities": {
-            "last_24h": activity_count
-        },
-        "system": {
-            "timestamp": datetime.utcnow(),
-            "status": "healthy"
+        "success": True,
+        "message": "System status retrieved successfully",
+        "data": {
+            "users": {
+                "total": user_count,
+                "active": active_user_count
+            },
+            "api_keys": {
+                "total": api_keys_count,
+                "active": active_api_keys
+            },
+            "activities": {
+                "last_24h": activity_count
+            },
+            "system": {
+                "timestamp": datetime.utcnow(),
+                "status": "healthy"
+            }
         }
     } 

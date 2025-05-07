@@ -16,16 +16,16 @@
   - [x] Hata mesajları
   - [x] Kullanıcı geri bildirimleri
 - [ ] Gelişmiş şablon düzenleme
-  - [ ] Markdown desteği
+  - [x] Markdown desteği
   - [ ] Değişken önerileri
-  - [ ] Önizleme özelliği
+  - [x] Önizleme özelliği
 
 ### Backend Geliştirmeleri
 - [x] WebSocket sunucusu
 - [x] Gerçek zamanlı olay yönetimi
 - [x] Kullanıcı kimlik doğrulama
 - [x] Performans optimizasyonu
-- [ ] Kapsamlı API test coverage
+- [x] Kapsamlı API test coverage
 - [ ] Dağıtık zamanlayıcı sistemi
 
 ### Mesajlaşma Geliştirmeleri
@@ -33,12 +33,12 @@
   - [x] Regex desteği
   - [x] Dinamik değişkenler
   - [x] Test araçları
-- [ ] Hedefli mesajlaşma
-  - [ ] Grup kullanıcılarını hedefleme
+- [x] Hedefli mesajlaşma
+  - [x] Grup kullanıcılarını hedefleme
   - [ ] Kullanıcı segmentasyonu
-  - [ ] Kişiselleştirilmiş içerik gönderimi
+  - [x] Kişiselleştirilmiş içerik gönderimi
 - [ ] Dosya paylaşımı
-  - [ ] Resim, video ve belge desteği
+  - [x] Resim, video ve belge desteği
   - [ ] Dosya boyutu sınırlamaları
   - [ ] Dosya önbellekleme
 
@@ -47,8 +47,8 @@
 - [x] WebSocket kimlik doğrulama
 - [x] Rate limiting ve DDoS koruması
 - [ ] İki faktörlü kimlik doğrulama
-- [ ] IP kısıtlamaları
-- [ ] Gelişmiş log analizi
+- [x] IP kısıtlamaları
+- [x] Gelişmiş log analizi
 
 ## Orta Vadeli Hedefler (3-6 ay)
 
@@ -137,4 +137,26 @@
 - [ ] Microservice mimarisi
 - [ ] GraphQL implementasyonu
 - [ ] Serverless fonksiyonlar
-- [ ] Event-driven mimari 
+- [ ] Event-driven mimari
+
+## Öncelikli İyileştirmeler (v1.5.0)
+
+- [x] WebSocket Manager performans optimizasyonu
+- [x] Otomatik yeniden bağlanma algoritması iyileştirmesi
+- [x] Gelişmiş hata raporlama sistemi
+- [x] API dokümantasyonu güncelleme
+- [x] Test coverage artırma
+- [x] CI/CD pipeline iyileştirmeleri
+
+## Gelecek Sürüm Hedefleri (v1.6.0)
+
+- [ ] GraphQL API desteği
+- [ ] Performans izleme dashboardu
+- [ ] Kullanıcı segmentasyonu
+- [ ] Çevrimdışı mesaj kuyruk yönetimini güçlendirme
+- [ ] Mesaj şablon önbelleğini optimize etme
+- [ ] Bot marketplace için altyapı
+- [ ] Güvenlik iyileştirmeleri
+  - [ ] API rate limiting
+  - [ ] İki faktörlü kimlik doğrulama
+  - [ ] IP kısıtlamaları artırma 

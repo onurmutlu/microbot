@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 import enum
 
@@ -15,7 +15,7 @@ class MessageLog(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    telegram_id = Column(Integer, ForeignKey("groups.telegram_id"))
+    group_id = Column(Integer, ForeignKey("groups.id"))
     target_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     message_template_id = Column(Integer, ForeignKey("message_templates.id"))
     message_content = Column(Text, nullable=True)
@@ -25,7 +25,7 @@ class MessageLog(Base):
     
     # İlişkiler
     user = relationship("User", foreign_keys=[user_id])
-    group = relationship("Group", foreign_keys=[telegram_id])
+    group = relationship("Group", foreign_keys=[group_id])
     target_user = relationship("User", foreign_keys=[target_user_id])
     template = relationship("MessageTemplate")
     

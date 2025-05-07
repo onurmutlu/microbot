@@ -11,11 +11,13 @@ from telethon.tl.functions.channels import JoinChannelRequest, GetFullChannelReq
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
+from sqlalchemy.dialects.postgresql import insert
 
 from app.models import User, Group, MessageTemplate, MessageLog, TargetUser, TelegramSession, SessionStatus
 from app.config import settings
 from app.services.auto_reply_service import get_matching_reply, get_best_reply
 from app.crud import message_template as template_crud
+from app.models.member import Member
 
 logger = logging.getLogger(__name__)
 
@@ -666,6 +668,96 @@ class TelegramService:
         
         return {"message": "Zamanlanmış gönderici zaten çalışmıyor"}
 
+    async def fetch_all_joined_groups(self, session_id: int, db: Session, user_id: int) -> List[Dict[str, Any]]:
+        try:
+            # Session kontrolü
+            session = db.query(TelegramSession).filter(
+                TelegramSession.id == session_id,
+                TelegramSession.user_id == user_id,
+                TelegramSession.status == SessionStatus.ACTIVE
+            ).first()
+            
+            if not session:
+                return []
+            
+            # Client oluştur
+            client = TelegramClient(
+                StringSession(session.session_string),
+                session.api_id,
+                session.api_hash
+            )
+            
+            await client.connect()
+            
+            if not await client.is_user_authorized():
+                await client.disconnect()
+                return []
+            
+            # Grupları getir
+            groups = []
+            async for dialog in client.iter_dialogs():
+                if dialog.is_group or (dialog.is_channel and hasattr(dialog.entity, 'megagroup') and dialog.entity.megagroup):
+                    entity = dialog.entity
+                    
+                    # Grup bilgilerini al
+                    group_id = entity.id
+                    group_name = entity.title if hasattr(entity, 'title') else "İsimsiz Grup"
+                    
+                    # Üye sayısını al
+                    members_count = None
+                    try:
+                        if hasattr(entity, 'participants_count'):
+                            members_count = entity.participants_count
+                        else:
+                            full_entity = await client(GetFullChannelRequest(channel=entity))
+                            members_count = full_entity.full_chat.participants_count
+                    except Exception:
+                        pass
+                    
+                    # Veritabanında kontrol et
+                    existing_group = db.query(Group).filter(
+                        Group.group_id == group_id,
+                        Group.user_id == user_id,
+                        Group.session_id == session_id
+                    ).first()
+                    
+                    if existing_group:
+                        # Mevcut grubu güncelle
+                        existing_group.group_name = group_name
+                        existing_group.members_count = members_count
+                        existing_group.is_active = True
+                        existing_group.updated_at = datetime.utcnow()
+                    else:
+                        # Yeni grup oluştur
+                        new_group = Group(
+                            user_id=user_id,
+                            session_id=session_id,
+                            group_id=group_id,
+                            group_name=group_name,
+                            members_count=members_count,
+                            joined_at=datetime.utcnow(),
+                            is_active=True,
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow()
+                        )
+                        db.add(new_group)
+                    
+                    groups.append({
+                        "group_id": group_id,
+                        "group_name": group_name,
+                        "members_count": members_count,
+                        "joined_at": datetime.utcnow().isoformat() if not existing_group else existing_group.joined_at.isoformat()
+                    })
+            
+            db.commit()
+            await client.disconnect()
+            
+            return groups
+            
+        except Exception as e:
+            logger.error(f"Grup çekme hatası: {str(e)}")
+            return []
+
     async def join_group(self, session_id: int, group_link: str) -> Dict[str, Any]:
         """
         Kullanıcıyı belirtilen gruba katılmak için kullanılır
@@ -889,3 +981,54 @@ class TelegramService:
                 "success": False,
                 "message": f"İşlem sırasında bir hata oluştu: {str(e)}"
             }
+
+    async def fetch_group_members(self, db, session_id: int, group_id: int):
+        """
+        Belirli bir grup için tüm katılımcıları çeker ve veritabanına kaydeder.
+        """
+        try:
+            # Oturum sahipliğini doğrula
+            telegram_session = await self.verify_session_ownership(db, session_id)
+            
+            # Telegram'a bağlan
+            client = await self.get_client(telegram_session)
+            await client.connect()
+            
+            if not await client.is_user_authorized():
+                raise ValueError("Telegram oturumu yetkili değil.")
+            
+            # Grup katılımcılarını çek
+            async for participant in client.iter_participants(group_id):
+                user_id = participant.id
+                username = participant.username
+                first_name = participant.first_name
+                last_name = participant.last_name
+                status = "active"  # Varsayılan durum
+                
+                # Üye olarak kaydet
+                async with db.begin():
+                    stmt = insert(Member).values(
+                        user_id=user_id,
+                        username=username,
+                        first_name=first_name,
+                        last_name=last_name,
+                        status=status,
+                        group_id=group_id,
+                        session_id=session_id
+                    ).on_conflict_do_update(
+                        index_elements=['user_id', 'group_id'],
+                        set_={
+                            'username': username,
+                            'first_name': first_name,
+                            'last_name': last_name,
+                            'status': status,
+                            'updated_at': datetime.utcnow()
+                        }
+                    )
+                    await db.execute(stmt)
+            
+            # Bağlantıyı kapat
+            await client.disconnect()
+            return True
+        except Exception as e:
+            raise e

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
@@ -10,7 +11,7 @@ from app.crud import auto_reply_rule as rule_crud
 from app.services.auto_reply_service import get_best_reply, find_regex_matches
 
 router = APIRouter(
-    prefix="/api",
+    prefix="/auto-replies",
     tags=["auto-reply"]
 )
 
@@ -31,7 +32,7 @@ class AutoReplyRuleResponse(AutoReplyRuleBase):
     created_at: str
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class AutoReplyTest(BaseModel):
     message: str = Field(..., description="Test edilecek mesaj metni")
@@ -56,7 +57,7 @@ async def get_auto_replies(
     if is_active is not None:
         rules = [rule for rule in rules if rule.is_active == is_active]
         
-    return rules
+    return {"success": True, "message": "Rules retrieved successfully", "data": rules}
 
 @router.post("/auto-replies", response_model=AutoReplyRuleResponse, status_code=status.HTTP_201_CREATED)
 async def create_auto_reply(
@@ -94,7 +95,7 @@ async def create_auto_reply(
         rule_crud.update_reply_rule(db, new_rule.id, is_active=rule.is_active)
         new_rule.is_active = rule.is_active
     
-    return new_rule
+    return {"success": True, "message": "Rule created successfully", "data": new_rule}
 
 @router.put("/auto-replies/{rule_id}", response_model=AutoReplyRuleResponse)
 async def update_auto_reply(
@@ -114,15 +115,15 @@ async def update_auto_reply(
     # Önce kuralın varlığını ve sahipliğini kontrol et
     existing_rule = rule_crud.get_rule_by_id(db, rule_id)
     if not existing_rule:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Kural bulunamadı"
+            content={"success": False, "message": "Kural bulunamadı", "data": {}}
         )
     
     if existing_rule.user_id != current_user.id:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu kural üzerinde işlem yapamazsınız"
+            content={"success": False, "message": "Bu kural üzerinde işlem yapamazsınız", "data": {}}
         )
     
     # Kuralı güncelle
@@ -133,7 +134,7 @@ async def update_auto_reply(
         response_text=rule.response_text,
         is_active=rule.is_active
     )
-    return updated_rule
+    return {"success": True, "message": "Rule updated successfully", "data": updated_rule}
 
 @router.patch("/auto-replies/{rule_id}/toggle", response_model=AutoReplyRuleResponse)
 async def toggle_auto_reply_status(
@@ -149,15 +150,15 @@ async def toggle_auto_reply_status(
     # Önce kuralın varlığını ve sahipliğini kontrol et
     existing_rule = rule_crud.get_rule_by_id(db, rule_id)
     if not existing_rule:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Kural bulunamadı"
+            content={"success": False, "message": "Kural bulunamadı", "data": {}}
         )
     
     if existing_rule.user_id != current_user.id:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu kural üzerinde işlem yapamazsınız"
+            content={"success": False, "message": "Bu kural üzerinde işlem yapamazsınız", "data": {}}
         )
     
     # Durumu tersine çevir
@@ -169,7 +170,7 @@ async def toggle_auto_reply_status(
         rule_id,
         is_active=new_status
     )
-    return updated_rule
+    return {"success": True, "message": "Rule status toggled successfully", "data": updated_rule}
 
 @router.delete("/auto-replies/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_auto_reply(
@@ -185,24 +186,26 @@ async def delete_auto_reply(
     # Önce kuralın varlığını ve sahipliğini kontrol et
     existing_rule = rule_crud.get_rule_by_id(db, rule_id)
     if not existing_rule:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Kural bulunamadı"
+            content={"success": False, "message": "Kural bulunamadı", "data": {}}
         )
     
     if existing_rule.user_id != current_user.id:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu kural üzerinde işlem yapamazsınız"
+            content={"success": False, "message": "Bu kural üzerinde işlem yapamazsınız", "data": {}}
         )
     
     # Kuralı sil
     result = rule_crud.delete_reply_rule(db, rule_id)
     if not result:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Kural silinirken bir hata oluştu"
+            content={"success": False, "message": "Kural silinirken bir hata oluştu", "data": {}}
         )
+    
+    return {"success": True, "message": "Rule deleted successfully", "data": {}}
 
 @router.post("/auto-replies/test", response_model=Dict[str, Any])
 async def test_auto_reply(
@@ -222,14 +225,21 @@ async def test_auto_reply(
     
     if reply:
         return {
-            "has_match": True,
-            "response": reply,
-            "match_details": meta
+            "success": True,
+            "message": "Match found",
+            "data": {
+                "has_match": True,
+                "response": reply,
+                "match_details": meta
+            }
         }
     else:
         return {
-            "has_match": False,
-            "message": "Bu mesaj için eşleşen kural bulunamadı."
+            "success": True,
+            "message": "No match found",
+            "data": {
+                "has_match": False
+            }
         }
 
 @router.post("/auto-replies/test-regex", response_model=Dict[str, Any])

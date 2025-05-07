@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, JSON, BigInteger
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 import enum
 
@@ -42,6 +42,8 @@ class Group(Base):
     session = relationship("TelegramSession", back_populates="groups")
     messages = relationship("Message", back_populates="group")
     auto_reply_rules = relationship("AutoReplyRule", back_populates="group")
+    members = relationship("Member", back_populates="group")
+    schedules = relationship("Schedule", back_populates="group")
     
     def __repr__(self):
         return f"<Group {self.group_name}>" 

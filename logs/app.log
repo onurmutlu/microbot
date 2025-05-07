@@ -61,3 +61,218 @@
 2025-04-27 14:19:58,878 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745752798.742232
 2025-04-27 14:32:14,627 - app.main - ERROR - HTTP error 401: Not authenticated
 2025-04-27 14:32:14,677 - app.main - ERROR - HTTP error 401: Not authenticated
+2025-04-28 17:52:38,976 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 17:52:39,098 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-28 17:52:39,099 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 17:53:19,397 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 17:53:31,518 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 17:53:31,808 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Schedule(schedules)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.schedule.Schedule'> class after both dependent classes have been defined.
+2025-04-28 17:53:31,809 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 18:02:45,777 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 18:03:06,525 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 18:03:06,842 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Message(messages)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.message.Message'> class after both dependent classes have been defined.
+2025-04-28 18:03:06,843 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 18:04:19,859 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 18:04:39,132 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 18:04:39,490 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Message(messages)], expression 'Group' failed to locate a name ('Group'). If this is a class name, consider adding this relationship() to the <class 'app.models.message.Message'> class after both dependent classes have been defined.
+2025-04-28 18:04:39,491 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 18:04:51,616 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 18:12:14,094 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 18:12:14,111 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship Template.auto_reply_rules - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 18:12:14,130 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 18:13:53,111 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 18:14:57,295 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 18:14:57,308 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship Template.auto_reply_rules - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 18:14:57,308 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 20:30:03,022 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 20:30:15,398 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 20:30:15,419 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship Template.auto_reply_rules - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 20:30:15,426 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 20:41:57,344 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 20:42:08,055 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 20:42:08,200 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship Template.auto_reply_rules - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 20:42:08,201 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 20:42:26,576 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 20:42:48,507 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 20:42:48,547 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship Template.auto_reply_rules - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 20:42:48,547 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 20:43:25,352 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 20:43:56,945 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 20:43:57,011 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship Template.auto_reply_rules - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 20:43:57,012 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 20:46:17,386 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 21:26:15,858 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 21:26:16,090 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Mapper 'Mapper[Group(groups)]' has no property 'schedules'.  If this property was indicated from other mappers or configure events, ensure registry.configure() has been called.
+2025-04-28 21:26:16,090 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 21:28:22,826 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 21:28:57,485 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 21:28:59,466 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Message(messages)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.message.Message'> class after both dependent classes have been defined.
+2025-04-28 21:28:59,469 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 21:49:19,446 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 21:49:19,818 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: When initializing mapper Mapper[Message(messages)], expression 'Template' failed to locate a name ('Template'). If this is a class name, consider adding this relationship() to the <class 'app.models.message.Message'> class after both dependent classes have been defined.
+2025-04-28 21:49:19,818 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 22:16:12,377 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 22:16:35,794 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 22:16:36,747 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Mapper 'Mapper[MessageTemplate(message_templates)]' has no property 'messages'.  If this property was indicated from other mappers or configure events, ensure registry.configure() has been called.
+2025-04-28 22:16:36,749 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 22:17:06,908 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 22:17:25,309 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 22:17:27,309 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship User.telegram_sessions - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 22:17:27,326 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 22:18:54,434 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 22:18:56,811 - app.main - ERROR - Tüm kullanıcılar için handler başlatma hatası: Could not determine join condition between parent/child tables on relationship User.telegram_sessions - there are no foreign keys linking these tables.  Ensure that referencing columns are associated with a ForeignKey or ForeignKeyConstraint, or specify a 'primaryjoin' expression.
+2025-04-28 22:18:56,812 - app.main - INFO - Uygulama başlatıldı
+2025-04-28 22:24:48,972 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-28 22:26:06,644 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-28 22:26:08,342 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-28 22:26:08,343 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:16:23,753 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:16:24,325 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:16:24,326 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:30:02,707 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:30:03,430 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:30:03,430 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:34:28,753 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 10:34:36,023 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:34:36,966 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:34:36,966 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:34:40,604 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 10:34:48,095 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:34:49,221 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:34:49,222 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:34:52,855 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 10:35:01,635 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:35:02,741 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:35:02,741 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:35:41,383 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:35:41,823 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:35:41,831 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:41:14,334 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:41:14,971 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:41:14,972 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:47:44,257 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745912864.253295
+2025-04-29 10:52:24,251 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745912864.253295
+2025-04-29 10:52:27,493 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745913147.489928
+2025-04-29 10:58:21,173 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745913147.489928
+2025-04-29 10:58:21,341 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 10:58:34,096 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:58:35,408 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:58:35,409 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:58:51,445 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 10:59:09,774 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:59:12,022 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:59:12,022 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:59:23,335 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 10:59:34,387 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:59:35,979 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:59:35,980 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 10:59:37,903 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 10:59:46,842 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 10:59:47,824 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 10:59:47,828 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:00:30,642 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:00:41,529 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:00:43,354 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:00:43,361 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:00:44,608 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:00:56,027 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:00:57,289 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:00:57,290 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:01:10,827 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:01:25,934 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:01:27,557 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:01:27,557 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:01:38,893 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:01:40,163 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:01:40,168 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:01:42,199 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:01:50,098 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:01:51,105 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:01:51,105 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:02:47,318 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:02:48,453 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:02:48,453 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:06:18,903 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:06:30,279 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:06:31,597 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:06:31,600 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:06:53,697 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:07:01,065 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:07:01,951 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:07:01,951 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:07:34,138 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:07:42,367 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:07:43,310 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:07:43,310 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:08:21,132 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:08:32,011 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:08:33,047 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:08:33,122 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:09:13,140 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:09:20,972 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:09:21,774 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:09:21,774 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:10:11,168 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:10:11,751 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:10:11,751 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:14:50,592 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:14:59,377 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:15:00,141 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:15:00,142 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:19:30,498 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745914770.493459
+2025-04-29 11:23:13,379 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745914770.493459
+2025-04-29 11:23:19,100 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745914999.100374
+2025-04-29 11:35:38,346 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745914999.100374
+2025-04-29 11:35:38,539 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:35:56,003 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:35:57,238 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:35:57,238 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:36:12,481 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:36:27,195 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:36:28,670 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:36:28,674 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:36:32,921 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:36:42,594 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:36:43,479 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:36:43,480 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:37:09,092 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:37:21,734 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:37:24,145 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:37:24,146 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:37:39,062 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 11:38:59,929 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 11:39:01,488 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 11:39:01,489 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 11:39:02,618 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745915942.617763
+2025-04-29 11:39:12,793 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745915942.617763
+2025-04-29 11:39:15,956 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745915955.956697
+2025-04-29 11:39:34,832 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745915955.956697
+2025-04-29 11:39:37,414 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745915977.414463
+2025-04-29 11:41:34,070 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745915977.414463
+2025-04-29 11:41:38,544 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745916098.54355
+2025-04-29 12:05:03,715 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745916098.54355
+2025-04-29 12:05:10,104 - app - INFO - WebSocket bağlantısı kuruldu: anonymous_1745917510.10307
+2025-04-29 12:20:45,768 - app - INFO - WebSocket bağlantısı kapatıldı: anonymous_1745917510.10307
+2025-04-29 12:20:46,095 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-04-29 12:21:05,055 - app.main - INFO - Veritabanı bağlantısı başarılı
+2025-04-29 12:21:06,731 - app.main - INFO - Başlatılacak aktif kullanıcı bulunamadı
+2025-04-29 12:21:06,734 - app.main - INFO - Uygulama başlatıldı
+2025-04-29 12:21:53,833 - app.main - INFO - Uygulama düzgün şekilde kapatıldı
+2025-05-01 21:27:26,700 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 00:40:53,761 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 00:41:32,161 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 00:41:55,557 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 04:34:23,506 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 04:34:58,901 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:26:28,978 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:26:29,047 - app.services.sse_manager - INFO - Temizlik görevi iptal edildi
+2025-05-02 19:30:33,070 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:36:56,793 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:37:10,682 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:37:26,601 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:37:41,677 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:37:54,828 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:51:32,971 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:51:33,043 - app.services.websocket_manager - INFO - WebSocket temizlik görevi başlatıldı
+2025-05-02 19:51:50,160 - app.services.sse_manager - INFO - SSE temizlik görevi başlatıldı
+2025-05-02 19:51:50,297 - app.services.websocket_manager - INFO - WebSocket temizlik görevi başlatıldı

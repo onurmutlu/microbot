@@ -8,7 +8,7 @@ import os
 from app.database import get_db
 from app.models import User
 from app.services.telegram_service import TelegramService
-from app.services.auth_service import get_current_active_user
+from app.services.auth_service import get_current_active_user, get_current_user_optional
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -38,9 +38,59 @@ class TelegramResponse(BaseModel):
     requires_2fa: Optional[bool] = False
     session_saved: Optional[bool] = False
 
+class ActiveSessionResponse(BaseModel):
+    success: bool
+    message: str
+    has_active_session: bool
+    phone: Optional[str] = None
+    api_id: Optional[str] = None
+    api_hash: Optional[str] = None
+
 # Session bilgilerini önbelleğe almak için geçici depolama
 # Gerçek uygulamada Redis veya veritabanı kullanılabilir
 active_sessions = {}
+
+@router.get("/active-session", response_model=ActiveSessionResponse)
+async def get_active_session(
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    Kullanıcının aktif Telegram oturumunu kontrol eder.
+    Token yoksa veya geçersizse boş bilgilerle cevap verilir.
+    """
+    try:
+        # Kullanıcı oturum açmamışsa
+        if not current_user:
+            return ActiveSessionResponse(
+                success=True,
+                message="Oturum açılmamış",
+                has_active_session=False
+            )
+            
+        # Kullanıcının kayıtlı bir oturumu var mı?
+        if current_user.session_string and current_user.api_id and current_user.api_hash and current_user.phone:
+            return ActiveSessionResponse(
+                success=True,
+                message="Aktif oturum bulundu",
+                has_active_session=True,
+                phone=current_user.phone,
+                api_id=current_user.api_id,
+                api_hash=current_user.api_hash
+            )
+        
+        return ActiveSessionResponse(
+            success=True,
+            message="Aktif oturum bulunamadı",
+            has_active_session=False
+        )
+        
+    except Exception as e:
+        logger.error(f"Aktif oturum kontrolü hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Oturum kontrolü sırasında bir hata oluştu: {str(e)}"
+        )
 
 @router.post("/start-login", response_model=TelegramResponse)
 async def start_telegram_login(

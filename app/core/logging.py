@@ -1,9 +1,78 @@
+import os
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
+from typing import Optional
 
+# Log dizinini oluştur
+os.makedirs("logs", exist_ok=True)
+
+# Loglama seviyesi ayarları
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+log_levels = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL
+}
+LEVEL = log_levels.get(LOG_LEVEL, logging.INFO)
+
+# Log formatı
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+formatter = logging.Formatter(LOG_FORMAT)
+
+# Konsol handler
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+console_handler.setLevel(LEVEL)
+
+# Dosya handler (rotasyonlu)
+file_handler = RotatingFileHandler(
+    "logs/app.log", 
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+file_handler.setFormatter(formatter)
+file_handler.setLevel(LEVEL)
+
+# Hata dosya handler
+error_file_handler = RotatingFileHandler(
+    "logs/error.log", 
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+error_file_handler.setFormatter(formatter)
+error_file_handler.setLevel(logging.ERROR)
+
+# Kök logger'ı temizle ve yeniden yapılandır
+for handler in logging.root.handlers[:]:
+    logging.root.removeHandler(handler)
+
+# Ana logger
 logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
+logger.setLevel(LEVEL)
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
+logger.addHandler(error_file_handler)
+logger.propagate = False
 
-handler = logging.StreamHandler(sys.stdout)
-handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-logger.addHandler(handler) 
+def get_logger(name: Optional[str] = None) -> logging.Logger:
+    """
+    Belirtilen isimle bir logger döndürür.
+    
+    Args:
+        name: Logger ismi. None ise ana logger döner.
+        
+    Returns:
+        Yapılandırılmış logger nesnesi
+    """
+    if name is None:
+        return logger
+    
+    child_logger = logging.getLogger(f"app.{name}")
+    child_logger.setLevel(LEVEL)
+    # Handler'lar ana logger'dan miras alınacak
+    child_logger.propagate = True
+    
+    return child_logger 

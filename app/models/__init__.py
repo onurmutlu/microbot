@@ -3,7 +3,6 @@ from .base import Base
 
 # Independent models
 from .license import License
-from .template import Template
 from .payment import Payment
 from .settings import Settings
 from .statistics import Statistics
@@ -17,6 +16,7 @@ from .api_key import ApiKey
 from .task import Task
 from .message import Message
 from .log import Log
+from .user_activity import UserActivity
 
 # Dependent models
 from .group import Group
@@ -24,7 +24,8 @@ from .message_template import MessageTemplate
 from .message_log import MessageLog
 from .target_user import TargetUser
 from .auto_reply import AutoReplyRule
-from .telegram_session import TelegramSession
+from .telegram_session import TelegramSession, SessionStatus
+from .member import Member
 
 # User model (with relationships to all other models)
 from .user import User
@@ -32,7 +33,8 @@ from .user import User
 __all__ = [
     "Base",
     "User", "Group", "MessageTemplate", "MessageLog", "TargetUser", "AutoReplyRule",
-    "License", "Message", "Template", "Log", "Settings", "Statistics", 
+    "License", "Message", "Log", "Settings", "Statistics", 
     "Payment", "Subscription", "Blacklist", "Schedule", "Analytics", 
-    "Notification", "Backup", "ApiKey", "Task", "TelegramSession"
+    "Notification", "Backup", "ApiKey", "Task", "TelegramSession", "SessionStatus", 
+    "Member", "UserActivity"
 ] 

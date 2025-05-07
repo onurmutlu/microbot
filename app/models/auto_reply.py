@@ -24,7 +24,7 @@ class AutoReplyRule(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    group_id = Column(Integer, ForeignKey("groups.telegram_id"))
+    group_id = Column(Integer, ForeignKey("groups.id"))
     trigger_type = Column(SQLEnum(TriggerType))
     trigger_value = Column(String)
     response_type = Column(SQLEnum(ResponseType))

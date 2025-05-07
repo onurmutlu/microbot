@@ -1,175 +1,68 @@
-from fastapi import WebSocket, WebSocketDisconnect
+"""
+WebSocket hizmetleri için yönlendirici modül.
+
+Bu modül, WebSocket hizmetleri için bir proxy sağlar ve asıl işlemleri
+app/services/websocket_manager.py'deki WebSocketManager sınıfına yönlendirir.
+
+License: MIT
+Author: MicroBot Team
+Version: 1.1.0
+"""
+
+from fastapi import WebSocket
 from typing import Dict, List, Any, Optional
+import logging
+from app.services.websocket_manager import websocket_manager
 import json
-import asyncio
 from datetime import datetime
-from redis import Redis
-from app.core.config import settings
-from app.core.security import decode_access_token, WebSocketSecurity, websocket_rate_limiter
-from app.core.logging import logger
-from app.core.monitoring import websocket_monitor
 
-class WebSocketManager:
-    def __init__(self) -> None:
-        self.active_connections: Dict[str, WebSocket] = {}
-        self.connection_times: Dict[str, datetime] = {}
-        self._cleanup_task: Optional[asyncio.Task] = None
-        self.redis = Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            decode_responses=True
-        )
-        self.pubsub = self.redis.pubsub()
-        self.channels = {
-            "message_templates": "message_templates_updates",
-            "auto_replies": "auto_replies_updates",
-            "groups": "groups_updates",
-            "scheduler": "scheduler_updates"
-        }
-        self.start_cleanup_task()
+logger = logging.getLogger(__name__)
 
-    async def connect(self, websocket: WebSocket, token: str) -> None:
-        try:
-            # Token doğrulama
-            payload = decode_access_token(token)
-            user_id = payload.get("sub")
-            if not user_id:
-                raise ValueError("Invalid token")
+async def connect(websocket: WebSocket, user_id: str, client_id: str):
+    """WebSocket bağlantısını başlatır"""
+    await websocket_manager.connect(websocket, user_id, client_id)
 
-            # Rate limiting kontrolü
-            if not await websocket_rate_limiter.check_rate_limit(websocket, user_id):
-                raise ValueError("Rate limit exceeded")
+async def disconnect(user_id: str):
+    """WebSocket bağlantısını kapatır"""
+    await websocket_manager.disconnect(user_id)
 
-            await websocket.accept()
-            self.active_connections[user_id] = websocket
-            self.connection_times[user_id] = datetime.now()
-            
-            # Redis kanallarına abone ol
-            for channel in self.channels.values():
-                await self.pubsub.subscribe(channel)
-            
-            # Redis mesaj dinleyicisini başlat
-            asyncio.create_task(self._listen_redis_messages(user_id))
-            
-            logger.info(f"New WebSocket connection: {user_id}")
-            websocket_monitor.connection_established(user_id)
-            
-        except Exception as e:
-            logger.error(f"WebSocket connection error: {str(e)}")
-            await websocket.close(code=1008, reason=str(e))
-            raise
+async def send_personal_message(message: Dict[str, Any], client_id: str):
+    """Belirli bir kullanıcıya mesaj gönderir"""
+    message_str = json.dumps(message)
+    await websocket_manager.send_personal_message(message_str, client_id)
 
-    async def disconnect(self, user_id: str) -> None:
-        if user_id in self.active_connections:
-            try:
-                await self.active_connections[user_id].close()
-                del self.active_connections[user_id]
-                del self.connection_times[user_id]
-                
-                # Redis aboneliklerini kaldır
-                for channel in self.channels.values():
-                    await self.pubsub.unsubscribe(channel)
-                
-                logger.info(f"WebSocket disconnected: {user_id}")
-                websocket_monitor.connection_closed(user_id)
-                
-            except Exception as e:
-                logger.error(f"Error during disconnect: {str(e)}")
+async def broadcast(message: Dict[str, Any], user_ids: Optional[List[str]] = None):
+    """Tüm bağlı kullanıcılara mesaj gönderir"""
+    await websocket_manager.broadcast(message, user_ids)
 
-    async def send_personal_message(self, user_id: str, message: Dict[str, Any]) -> None:
-        if user_id in self.active_connections:
-            try:
-                # Rate limiting kontrolü
-                if not await websocket_rate_limiter.check_rate_limit(self.active_connections[user_id], user_id):
-                    logger.warning(f"Rate limit exceeded for user {user_id}")
-                    return
+async def subscribe_to_channel(client_id: str, channel: str):
+    """Kullanıcıyı bir kanala abone eder"""
+    await websocket_manager.subscribe(client_id, channel)
 
-                # Mesaj güvenliği kontrolü
-                if not await WebSocketSecurity.validate_message_size(message):
-                    logger.warning(f"Message size exceeds limit for user {user_id}")
-                    return
+async def unsubscribe_from_channel(client_id: str, channel: str):
+    """Kullanıcının bir kanala aboneliğini kaldırır"""
+    await websocket_manager.unsubscribe(client_id, channel)
 
-                message = await WebSocketSecurity.sanitize_message(message)
-                await self.active_connections[user_id].send_json(message)
-                
-                # Monitoring
-                websocket_monitor.message_sent(user_id, message.get("type", "unknown"))
-                
-            except Exception as e:
-                logger.error(f"Error sending message to user {user_id}: {str(e)}")
-                await self.disconnect(user_id)
+def get_connection_stats():
+    """Bağlantı istatistiklerini döndürür"""
+    return websocket_manager.get_connection_stats()
 
-    async def broadcast(self, message: Dict[str, Any], exclude_user: Optional[str] = None) -> None:
-        for user_id, connection in self.active_connections.items():
-            if user_id != exclude_user:
-                try:
-                    # Rate limiting kontrolü
-                    if not await websocket_rate_limiter.check_rate_limit(connection, user_id):
-                        continue
-
-                    # Mesaj güvenliği kontrolü
-                    if not await WebSocketSecurity.validate_message_size(message):
-                        continue
-
-                    message = await WebSocketSecurity.sanitize_message(message)
-                    await connection.send_json(message)
-                    
-                    # Monitoring
-                    websocket_monitor.message_sent(user_id, message.get("type", "unknown"))
-                    
-                except Exception as e:
-                    logger.error(f"Error broadcasting to user {user_id}: {str(e)}")
-                    await self.disconnect(user_id)
-
-    async def _listen_redis_messages(self, user_id: str) -> None:
-        while True:
-            try:
-                message = await self.pubsub.get_message(ignore_subscribe_messages=True)
-                if message:
-                    data = json.loads(message["data"])
-                    websocket_monitor.message_received(user_id, data.get("type", "unknown"))
-                    await self.send_personal_message(user_id, data)
-            except Exception as e:
-                logger.error(f"Error processing Redis message: {str(e)}")
-                await asyncio.sleep(1)
-
-    async def _cleanup_inactive_connections(self) -> None:
-        while True:
-            try:
-                current_time = datetime.now()
-                inactive_tokens = [
-                    token for token, connect_time in self.connection_times.items()
-                    if (current_time - connect_time).total_seconds() > settings.WS_CONNECTION_TIMEOUT
-                ]
-                for token in inactive_tokens:
-                    await self.disconnect(token)
-                await asyncio.sleep(settings.WS_CLEANUP_INTERVAL)
-            except Exception as e:
-                logger.error(f"Error in connection cleanup: {str(e)}")
-                await asyncio.sleep(60)
-
-    def start_cleanup_task(self) -> None:
-        if not self._cleanup_task:
-            self._cleanup_task = asyncio.create_task(self._cleanup_inactive_connections())
-
-    def stop_cleanup_task(self) -> None:
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-            self._cleanup_task = None
-
-    def get_connection_stats(self) -> Dict[str, Any]:
-        return {
-            "active_connections": len(self.active_connections),
-            "connection_times": self.connection_times,
-            "monitoring_stats": websocket_monitor.get_stats()
-        }
-
-    async def publish_update(self, channel: str, data: Dict[str, Any]) -> None:
-        try:
-            await self.redis.publish(self.channels[channel], json.dumps(data))
-            logger.info(f"WebSocket update published to channel {channel}")
-        except Exception as e:
-            logger.error(f"Error publishing update to channel {channel}: {str(e)}")
-
-websocket_manager = WebSocketManager() 
+async def publish_update(channel: str, data: Dict[str, Any]):
+    """Belirli bir kanala mesaj yayınlar"""
+    clients_in_channel = [
+        client_id for client_id, channels in websocket_manager.user_subscriptions.items()
+        if channel in channels
+    ]
+    
+    if not clients_in_channel:
+        logger.warning(f"No clients subscribed to channel: {channel}")
+        return 0
+        
+    await websocket_manager.broadcast({
+        "type": "update",
+        "channel": channel,
+        "data": data,
+        "timestamp": datetime.now().isoformat()
+    }, clients_in_channel)
+    
+    return len(clients_in_channel) 

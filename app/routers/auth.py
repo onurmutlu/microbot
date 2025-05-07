@@ -2,18 +2,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import asyncio
-from datetime import timedelta
+from datetime import timedelta, datetime
 from pydantic import BaseModel
 from typing import Optional
+from fastapi.responses import JSONResponse
+import hashlib
+import hmac
+import time
 
 from app.database import get_db
-from app.schemas import UserCreate, UserLogin, VerifyCode, Token
+from app.schemas import UserCreate, UserLogin, VerifyCode, Token, TelegramLoginData
 from app.models import User
 from app.services.auth_service import authenticate_user, create_access_token, get_password_hash, get_current_active_user
 from app.services.telegram_service import TelegramService
 from app.config import settings
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/auth",
+    tags=["auth"]
+)
 
 # Telethon auth için schema
 class TelegramAuthRequest(BaseModel):
@@ -30,7 +37,10 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     # Kullanıcı adı benzersiz olmalı
     db_user = db.query(User).filter(User.username == user.username).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Kullanıcı adı zaten kullanılıyor")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"success": False, "message": "Kullanıcı adı zaten kullanılıyor", "data": {}}
+        )
     
     # Yeni kullanıcı oluştur
     hashed_password = get_password_hash(user.password)
@@ -45,16 +55,16 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     
-    return {"message": "Kullanıcı başarıyla oluşturuldu"}
+    return {"success": True, "message": "Kullanıcı başarıyla oluşturuldu", "data": {}}
 
 @router.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Hatalı kullanıcı adı veya şifre",
-            headers={"WWW-Authenticate": "Bearer"},
+            content={"success": False, "message": "Hatalı kullanıcı adı veya şifre", "data": {}},
+            headers={"WWW-Authenticate": "Bearer"}
         )
     
     # Telegram oturumunu kontrol et
@@ -68,22 +78,26 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
     )
     
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "telegram_login_required": session_result.get("login_required", False)
+        "success": True,
+        "message": "Login successful",
+        "data": {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "telegram_login_required": session_result.get("login_required", False)
+        }
     }
 
 @router.post("/telegram/auth")
 async def telegram_auth(phone: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     telegram_service = TelegramService(db, current_user.id)
     result = await telegram_service.create_session(phone=phone)
-    return result
+    return {"success": True, "message": "Authentication process started", "data": result}
 
 @router.post("/telegram/verify")
 async def verify_code(data: VerifyCode, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     telegram_service = TelegramService(db, current_user.id)
     result = await telegram_service.create_session(code=data.code)
-    return result
+    return {"success": True, "message": "Verification completed", "data": result}
 
 @router.post("/telegram/auth", status_code=status.HTTP_200_OK)
 async def telegram_auth_new(data: TelegramAuthRequest, db: Session = Depends(get_db)):
@@ -101,11 +115,11 @@ async def telegram_auth_new(data: TelegramAuthRequest, db: Session = Depends(get
             phone=data.phone
         )
         
-        return result
+        return {"success": True, "message": "Authentication request sent", "data": result}
     except Exception as e:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            content={"success": False, "message": str(e), "data": {}}
         )
 
 @router.post("/telegram/verify", status_code=status.HTTP_200_OK)
@@ -124,13 +138,61 @@ async def telegram_verify(data: TelegramVerifyRequest, db: Session = Depends(get
         )
         
         if result.get("success"):
-            return {"status": "success", "message": "Telegram oturumu başarıyla oluşturuldu"}
+            return {"success": True, "message": "Telegram oturumu başarıyla oluşturuldu", "data": {}}
         elif result.get("two_factor_required"):
-            return {"status": "2fa_required", "message": "İki faktörlü doğrulama gerekli"}
+            return {"success": True, "message": "İki faktörlü doğrulama gerekli", "data": {"two_factor_required": True}}
         else:
-            return {"status": "error", "message": result.get("message", "Bir hata oluştu")}
+            return {"success": False, "message": result.get("message", "Bir hata oluştu"), "data": {}}
     except Exception as e:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            content={"success": False, "message": str(e), "data": {}}
         )
+
+@router.post("/telegram-login", status_code=status.HTTP_200_OK)
+async def telegram_login(data: TelegramLoginData, db: Session = Depends(get_db)):
+    secret_key = hashlib.sha256(settings.BOT_TOKEN.encode()).digest()
+    
+    check_data = data.dict(exclude={"hash"})
+    check_string = '\n'.join(f"{k}={check_data[k]}" for k in sorted(check_data))
+    
+    # Hash doğrulama
+    expected_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+    if expected_hash != data.hash:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Geçersiz Telegram login hash")
+    
+    # Kullanıcı var mı kontrolü
+    user = db.query(User).filter(User.id == data.id).first()
+    
+    if not user:
+        # Yeni kullanıcı oluştur
+        username = data.username or f"telegram_{data.id}"
+        user = User(
+            id=data.id,
+            username=username,
+            first_name=data.first_name,
+            last_name=data.last_name,
+            photo_url=data.photo_url,
+            is_active=True,
+            last_login=datetime.utcnow()
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        # Kullanıcı bilgilerini güncelle
+        user.first_name = data.first_name
+        user.last_name = data.last_name
+        user.username = data.username or user.username
+        user.photo_url = data.photo_url or user.photo_url
+        user.last_login = datetime.utcnow()
+        user.is_active = True
+        db.commit()
+    
+    # Token oluştur
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    return {"token": access_token}

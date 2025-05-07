@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 import enum
 
@@ -28,6 +28,8 @@ class MessageTemplate(Base):
     user = relationship("User", back_populates="message_templates")
     logs = relationship("MessageLog", back_populates="template")
     auto_reply_rules = relationship("AutoReplyRule", back_populates="template")
+    schedules = relationship("Schedule", back_populates="template")
+    messages = relationship("Message", back_populates="template")
     
     def __repr__(self):
         return f"<MessageTemplate {self.name}>" 

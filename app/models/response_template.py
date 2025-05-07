@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Float
-from app.db.base_class import Base
+from app.models.base import Base
 from datetime import datetime
 
 class ResponseTemplate(Base):

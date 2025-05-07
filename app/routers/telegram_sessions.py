@@ -37,9 +37,7 @@ class Telegram2FARequest(BaseModel):
 class TelegramResponse(BaseModel):
     success: bool
     message: str
-    requires_2fa: Optional[bool] = False
-    session_saved: Optional[bool] = False
-    session_id: Optional[int] = None
+    data: Optional[Dict[str, Any]] = None
 
 class TelegramSessionResponse(BaseModel):
     id: int
@@ -103,9 +101,9 @@ async def start_telegram_login(
         
         # Kullanıcının maksimum oturum sınırını kontrol et
         if current_sessions_count >= current_user.max_sessions:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Hesap ekleme limitine ulaştınız (maksimum {current_user.max_sessions} hesap)."
+            return TelegramResponse(
+                success=False,
+                message=f"Hesap ekleme limitine ulaştınız (maksimum {current_user.max_sessions} hesap)."
             )
             
         # Aynı telefon numarasıyla kayıtlı session var mı kontrol et
@@ -115,9 +113,9 @@ async def start_telegram_login(
         ).first()
         
         if existing_session and existing_session.status == SessionStatus.ACTIVE:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Bu telefon numarası ({request.phone}) zaten hesabınıza eklenmiş."
+            return TelegramResponse(
+                success=False,
+                message=f"Bu telefon numarası ({request.phone}) zaten hesabınıza eklenmiş."
             )
             
         # TelegramService oluştur
@@ -154,7 +152,8 @@ async def start_telegram_login(
             logger.info(f"Login başlatıldı: {request.phone} - Doğrulama kodu gönderildi")
             return TelegramResponse(
                 success=True,
-                message="Doğrulama kodu telefonunuza gönderildi"
+                message="Doğrulama kodu telefonunuza gönderildi",
+                data={}
             )
         else:
             # Hata durumu
@@ -176,18 +175,16 @@ async def start_telegram_login(
                 db.add(error_session)
                 db.commit()
             
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
+            return TelegramResponse(
+                success=False,
+                message=error_msg
             )
             
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Login hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Oturum başlatma sırasında bir hata oluştu: {str(e)}"
+        return TelegramResponse(
+            success=False,
+            message=f"Oturum başlatma sırasında bir hata oluştu: {str(e)}"
         )
 
 @router.post("/confirm-code", response_model=TelegramResponse)
@@ -208,16 +205,16 @@ async def confirm_telegram_code(
         
         # Telefon numarası için aktif oturum yok mu?
         if request.phone not in active_sessions:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Oturum zamananaşımına uğradı veya başlatılmadı. Lütfen tekrar oturum başlatın."
+            return TelegramResponse(
+                success=False,
+                message="Oturum zamananaşımına uğradı veya başlatılmadı. Lütfen tekrar oturum başlatın."
             )
         
         # Kullanıcı doğrulaması
         if active_sessions[request.phone]["user_id"] != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Bu oturuma erişim izniniz yok."
+            return TelegramResponse(
+                success=False,
+                message="Bu oturuma erişim izniniz yok."
             )
         
         # Önceki adımdan TelegramService'i al
@@ -275,8 +272,10 @@ async def confirm_telegram_code(
             return TelegramResponse(
                 success=True,
                 message="Oturum başarıyla başlatıldı",
-                session_saved=True,
-                session_id=session_id
+                data={
+                    "session_saved": True,
+                    "session_id": session_id
+                }
             )
         
         elif result.get("two_factor_required", False):
@@ -288,7 +287,9 @@ async def confirm_telegram_code(
             return TelegramResponse(
                 success=True,
                 message="İki faktörlü doğrulama şifresi gerekli",
-                requires_2fa=True
+                data={
+                    "requires_2fa": True
+                }
             )
         
         else:
@@ -308,18 +309,16 @@ async def confirm_telegram_code(
                 existing_session.updated_at = datetime.utcnow()
                 db.commit()
             
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
+            return TelegramResponse(
+                success=False,
+                message=error_msg
             )
             
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Kod doğrulama hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Doğrulama sırasında bir hata oluştu: {str(e)}"
+        return TelegramResponse(
+            success=False,
+            message=f"Doğrulama sırasında bir hata oluştu: {str(e)}"
         )
 
 @router.post("/confirm-2fa-password", response_model=TelegramResponse)
@@ -340,16 +339,16 @@ async def confirm_2fa_password(
         
         # Telefon numarası için aktif oturum yok mu?
         if request.phone not in active_sessions:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Oturum zamananaşımına uğradı veya başlatılmadı. Lütfen tekrar oturum başlatın."
+            return TelegramResponse(
+                success=False,
+                message="Oturum zamananaşımına uğradı veya başlatılmadı. Lütfen tekrar oturum başlatın."
             )
         
         # Kullanıcı doğrulaması
         if active_sessions[request.phone]["user_id"] != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Bu oturuma erişim izniniz yok."
+            return TelegramResponse(
+                success=False,
+                message="Bu oturuma erişim izniniz yok."
             )
         
         # Önceki adımdan TelegramService'i al
@@ -407,8 +406,10 @@ async def confirm_2fa_password(
             return TelegramResponse(
                 success=True,
                 message="İki faktörlü doğrulama başarılı, oturum başlatıldı",
-                session_saved=True,
-                session_id=session_id
+                data={
+                    "session_saved": True,
+                    "session_id": session_id
+                }
             )
         else:
             # Hata durumu
@@ -427,18 +428,16 @@ async def confirm_2fa_password(
                 existing_session.updated_at = datetime.utcnow()
                 db.commit()
             
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
+            return TelegramResponse(
+                success=False,
+                message=error_msg
             )
             
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"2FA doğrulama hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Doğrulama sırasında bir hata oluştu: {str(e)}"
+        return TelegramResponse(
+            success=False,
+            message=f"Doğrulama sırasında bir hata oluştu: {str(e)}"
         )
 
 @router.get("/list-sessions", response_model=List[TelegramSessionResponse])
@@ -455,7 +454,7 @@ async def list_telegram_sessions(
             TelegramSession.user_id == current_user.id
         ).order_by(TelegramSession.created_at.desc()).all()
         
-        return [
+        session_list = [
             TelegramSessionResponse(
                 id=session.id,
                 phone_number=session.phone_number,
@@ -464,11 +463,13 @@ async def list_telegram_sessions(
                 updated_at=session.updated_at
             ) for session in sessions
         ]
+        
+        return session_list
     except Exception as e:
         logger.error(f"Oturum listeleme hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Oturumlar listelenirken bir hata oluştu: {str(e)}"
+        return TelegramResponse(
+            success=False,
+            message=f"Oturumlar listelenirken bir hata oluştu: {str(e)}"
         )
 
 @router.delete("/delete-session", status_code=status.HTTP_204_NO_CONTENT)
@@ -490,9 +491,9 @@ async def delete_telegram_session(
         ).first()
         
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"ID'si {request.session_id} olan oturum bulunamadı."
+            return TelegramResponse(
+                success=False,
+                message=f"ID'si {request.session_id} olan oturum bulunamadı."
             )
         
         # Session dosyasını sil (eğer varsa)
@@ -510,14 +511,16 @@ async def delete_telegram_session(
         
         logger.info(f"Oturum silindi: ID={session.id}, Telefon={session.phone_number}, Kullanıcı={current_user.id}")
         
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except HTTPException:
-        raise
+        return TelegramResponse(
+            success=True,
+            message="Oturum başarıyla silindi",
+            data={}
+        )
     except Exception as e:
         logger.error(f"Oturum silme hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Oturum silinirken bir hata oluştu: {str(e)}"
+        return TelegramResponse(
+            success=False,
+            message=f"Oturum silinirken bir hata oluştu: {str(e)}"
         )
 
 @router.get("/user/profile", response_model=UserProfileResponse)
@@ -535,14 +538,16 @@ async def get_user_profile(
             TelegramSession.status == SessionStatus.ACTIVE
         ).count()
         
-        return UserProfileResponse(
+        profile_data = UserProfileResponse(
             plan=current_user.plan.value,
             max_sessions=current_user.max_sessions,
             current_session_count=current_session_count
         )
+        
+        return profile_data
     except Exception as e:
         logger.error(f"Profil bilgisi getirme hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Profil bilgileri alınırken bir hata oluştu: {str(e)}"
+        return TelegramResponse(
+            success=False,
+            message=f"Profil bilgileri alınırken bir hata oluştu: {str(e)}"
         ) 
