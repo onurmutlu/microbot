@@ -10,7 +10,7 @@ from app.services.auth_service import get_current_active_user
 from app.crud import message_template as template_crud
 
 router = APIRouter(
-    prefix="/api/message-templates",
+    prefix="/message-templates",
     tags=["templates"]
 )
 

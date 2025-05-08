@@ -16,7 +16,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/telegram",
+    prefix="/telegram",
     tags=["telegram-sessions"]
 )
 

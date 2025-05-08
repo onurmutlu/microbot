@@ -373,15 +373,36 @@ class ReconnectManager:
         self.reset()
     
     def get_connection_info(self, client_id: str) -> Dict[str, Any]:
-        """Belirli bir bağlantının bilgilerini döndürür"""
-        # Bu da ileride genişletilebilir
+        """Belirli bir istemci için bağlantı bilgilerini döndürür"""
         return {
-            "client_id": client_id,
-            "state": self.state,
+            "state": self.state.value,
             "attempt_count": self.attempt_count,
-            "last_connection_time": self._last_connection_time,
-            "strategy": self.strategy,
+            "strategy": self.strategy.value,
+            "last_connection_time": self._last_connection_time
         }
+        
+    def connection_succeeded(self, client_id: str) -> None:
+        """Bağlantı başarılı olduğunda çağrılır"""
+        logger.info(f"Bağlantı başarılı: {client_id}")
+        self.state = ReconnectState.CONNECTED
+        self.attempt_count = 0
+        self._last_connection_time = time.time()
+        
+        # Bağlantı geçmişine ekle
+        self._connection_history.append({
+            "event": "connect",
+            "timestamp": time.time(),
+            "client_id": client_id
+        })
+        
+        # Son 50 bağlantı olayını tut
+        if len(self._connection_history) > 50:
+            self._connection_history = self._connection_history[-50:]
+            
+    def connection_failed(self, client_id: str, reason: Optional[str] = None) -> None:
+        """Bağlantı başarısız olduğunda çağrılır"""
+        logger.warning(f"Bağlantı başarısız: {client_id}, neden: {reason or 'bilinmiyor'}")
+        self.record_disconnection(reason)
     
     def _calculate_backoff_time(self) -> float:
         """Seçilen stratejiye göre bekleme süresini hesaplar"""

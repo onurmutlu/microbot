@@ -8,7 +8,7 @@ from app.services.auth_service import get_current_active_user
 from app.services.scheduled_messaging import get_scheduled_messaging_service
 
 router = APIRouter(
-    prefix="/api/scheduler",
+    prefix="/scheduler",
     tags=["scheduler"]
 )
 

@@ -12,10 +12,18 @@ from sqlalchemy.orm import Session
 import uvicorn
 import asyncio
 import json
+import sys
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 import time
 import uuid
+
+# Temel logging ayarlarını yap
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 from app.database import SessionLocal, engine, get_db
 from app.models.base import Base
@@ -46,8 +54,10 @@ logger = logging.getLogger("app.main")
 uvicorn_logger_names = ["uvicorn", "uvicorn.error", "uvicorn.access"]
 for logger_name in uvicorn_logger_names:
     uvicorn_logger = logging.getLogger(logger_name)
-    uvicorn_logger.handlers = []  # Mevcut handler'ları temizle
-    uvicorn_logger.propagate = False  # Ana logger'a log gönderme
+    if not uvicorn_logger.handlers:
+        uvicorn_logger.handlers = logger.handlers  # Ana logger ile aynı handlerları kullan
+    uvicorn_logger.setLevel(logging.INFO)
+    uvicorn_logger.propagate = True  # Ana logger'a log gönder
 
 # Websocket logger'ı
 websocket_logger = logging.getLogger("app")
@@ -83,6 +93,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"Veritabanı bağlantı hatası: {str(e)}")
         finally:
             db.close()
+        
+        # SSE ve WebSocket Manager temizlik görevlerini başlat
+        try:
+            websocket_manager.start_cleanup_task()
+            sse_manager.start_cleanup_task()
+            logger.info("WebSocket ve SSE temizlik görevleri başlatıldı")
+        except Exception as e:
+            logger.error(f"Temizlik görevlerini başlatma hatası: {str(e)}, uygulama devam ediyor")
             
         logger.info("Uygulama başlatıldı")
     except Exception as e:
@@ -98,6 +116,10 @@ async def lifespan(app: FastAPI):
 
         # Tüm Telegram handler'larını durdur
         await stop_all_telegram_handlers()
+        
+        # WebSocket ve SSE Manager temizlik görevlerini durdur
+        websocket_manager.stop_cleanup_task()
+        sse_manager.stop_cleanup_task()
         
         logger.info("Uygulama düzgün şekilde kapatıldı")
     except Exception as e:
@@ -670,4 +692,17 @@ async def get_sse_stats():
 
 # Geliştirme sunucusunu çalıştır
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    try:
+        print("MicroBot başlatılıyor... Lütfen bekleyin.")
+        print("Uvicorn başlatma...")
+        import uvicorn
+        uvicorn.run(
+            "app.main:app", 
+            host="0.0.0.0", 
+            port=8000,  # 8001 yerine 8000 portu kullan
+            log_level="info",
+            log_config=None,  # Varsayılan ayarları kullan
+            access_log=True
+        )
+    except Exception as e:
+        print(f"Başlatma hatası: {str(e)}")

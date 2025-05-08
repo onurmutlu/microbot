@@ -50,8 +50,8 @@ class SSEManager:
         }
         self.metrics_max_items = 100  # Her metrik türü için saklanacak maksimum öğe sayısı
         
-        # Temizlik görevini başlat
-        self.start_cleanup_task()
+        # Asenkron başlatma işlemleri uygulama başlatıldığında yapılacak
+        logger.info("SSE Manager başlatıldı (cleanup görevi daha sonra başlatılacak)")
     
     async def connect(self, client_id: str, queue: asyncio.Queue) -> None:
         """Yeni bir SSE bağlantısını kaydet"""
@@ -308,8 +308,12 @@ class SSEManager:
     def start_cleanup_task(self) -> None:
         """Temizlik görevini başlat"""
         if not self._cleanup_task:
-            self._cleanup_task = asyncio.create_task(self._cleanup_inactive_connections())
-            logger.info("SSE temizlik görevi başlatıldı")
+            try:
+                loop = asyncio.get_running_loop()
+                self._cleanup_task = loop.create_task(self._cleanup_inactive_connections())
+                logger.info("SSE temizlik görevi başlatıldı")
+            except RuntimeError:
+                logger.warning("Event loop çalışmıyor, SSE temizlik görevi başlatılamadı")
     
     def stop_cleanup_task(self) -> None:
         """Temizlik görevini durdur"""
@@ -317,7 +321,7 @@ class SSEManager:
             self._cleanup_task.cancel()
             self._cleanup_task = None
             logger.info("SSE temizlik görevi durduruldu")
-    
+            
     def get_stats(self) -> Dict[str, Any]:
         """SSE yöneticisi hakkında istatistikler döndür"""
         now = datetime.now()
@@ -391,5 +395,14 @@ class SSEManager:
         
         return summary
 
-# Global SSE yönetici örneği
-sse_manager = SSEManager() 
+# Global SSE yönetici örneği singleton pattern ile
+_sse_manager_instance = None
+
+def get_sse_manager():
+    """SSE Manager için singleton örneği oluşturur"""
+    global _sse_manager_instance
+    if _sse_manager_instance is None:
+        _sse_manager_instance = SSEManager()
+    return _sse_manager_instance
+
+sse_manager = get_sse_manager() 

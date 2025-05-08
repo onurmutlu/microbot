@@ -97,14 +97,8 @@ class WebSocketManager:
         self.max_reconnect_attempts = 5
         self.executor = ThreadPoolExecutor(max_workers=4)  # Ağır işlemler için thread havuzu
         
-        # Hata düzeltmesi: asyncio loop kontrolü
-        try:
-            loop = asyncio.get_running_loop()
-            self._cleanup_task = loop.create_task(self._cleanup_inactive_connections())
-            logger.info("WebSocket Manager başlatıldı (mevcut event loop)")
-        except RuntimeError:
-            logger.info("WebSocket Manager başlatıldı (cleanup görevi ertelendi)")
-            self._cleanup_task = None  # Ana uygulama event loop başladığında başlatılacak
+        # Asenkron başlatma işlemleri uygulama başlatıldığında yapılacak
+        logger.info("WebSocket Manager başlatıldı (cleanup görevi daha sonra başlatılacak)")
         
         self.stats = {
             "total_connections": 0,
@@ -114,7 +108,6 @@ class WebSocketManager:
             "errors": 0,
             "last_cleanup": None
         }
-        logger.info("WebSocket Manager başlatıldı")
 
     async def connect(self, websocket: WebSocket, user_id: str, client_id: str):
         """Yeni bir WebSocket bağlantısını kabul et"""
@@ -447,13 +440,13 @@ class WebSocketManager:
         """Temizlik görevini başlatır"""
         if self._cleanup_task is None or self._cleanup_task.done():
             try:
-                self._cleanup_task = asyncio.create_task(self._cleanup_inactive_connections())
-                logger.info("Temizlik görevi başlatıldı")
+                loop = asyncio.get_running_loop()
+                self._cleanup_task = loop.create_task(self._cleanup_inactive_connections())
+                logger.info("WebSocket temizlik görevi başlatıldı")
             except RuntimeError:
-                logger.warning("Event loop çalışmıyor, temizlik görevi ertelendi")
+                logger.warning("Event loop çalışmıyor, WebSocket temizlik görevi başlatılamadı")
         else:
-            logger.debug("Temizlik görevi zaten çalışıyor")
-        return self._cleanup_task
+            logger.debug("WebSocket temizlik görevi zaten çalışıyor")
 
     def stop_cleanup_task(self) -> None:
         """Temizlik görevini durdurur"""
@@ -621,5 +614,14 @@ class WebSocketManager:
             reconnect_manager.connection_failed(client_id, reason=str(e))
             return False
 
-# Global WebSocket yöneticisi örneği
-websocket_manager = WebSocketManager()
+# Global WebSocket yöneticisi örneği singleton pattern ile
+_websocket_manager_instance = None
+
+def get_websocket_manager():
+    """WebSocket Manager için singleton örneği oluşturur"""
+    global _websocket_manager_instance
+    if _websocket_manager_instance is None:
+        _websocket_manager_instance = WebSocketManager()
+    return _websocket_manager_instance
+
+websocket_manager = get_websocket_manager()
