@@ -5,10 +5,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prod
-    restart: always
+    restart: on-failure
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env.prod
     volumes:
@@ -23,14 +25,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    # Prometheus için metrikleri açığa çıkarma
     labels:
       - "prometheus.enable=true"
       - "prometheus.job=microbot"
 
   db:
     image: postgres:15
-    restart: always
+    restart: on-failure
     volumes:
       - postgres_data:/var/lib/postgresql/data
     env_file:
@@ -38,7 +39,7 @@ services:
     networks:
       - microbot_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,7 +47,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    restart: always
+    restart: on-failure
     volumes:
       - redis_data:/data
     networks:
@@ -59,7 +60,7 @@ services:
 
   nginx:
     image: nginx:1.25-alpine
-    restart: always
+    restart: on-failure
     ports:
       - "80:80"
       - "443:443"
@@ -69,7 +70,8 @@ services:
       - ./nginx/certbot/conf:/etc/letsencrypt
       - ./nginx/certbot/www:/var/www/certbot
     depends_on:
-      - app
+      app:
+        condition: service_started
     networks:
       - microbot_network
 
@@ -78,7 +80,8 @@ services:
     volumes:
       - ./nginx/certbot/conf:/etc/letsencrypt
       - ./nginx/certbot/www:/var/www/certbot
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; done;'"
+    # Not running renew loop here → use external cron or manual run
 
   backup:
     build:
@@ -89,34 +92,32 @@ services:
     env_file:
       - .env.prod
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - microbot_network
 
-  # Prometheus - Metrik Toplama
   prometheus:
     image: prom/prometheus:latest
-    restart: always
+    restart: on-failure
     volumes:
       - ./monitoring/prometheus:/etc/prometheus
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
     ports:
       - "9090:9090"
     networks:
       - microbot_network
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
-  # Grafana - Görselleştirme
   grafana:
     image: grafana/grafana:latest
-    restart: always
+    restart: on-failure
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
@@ -129,12 +130,12 @@ services:
     networks:
       - microbot_network
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
 
-  # Elasticsearch - Log Toplama
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.14.0
-    restart: always
+    restart: on-failure
     environment:
       - discovery.type=single-node
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
@@ -145,10 +146,9 @@ services:
     ports:
       - "9200:9200"
 
-  # Kibana - Log Görüntüleme
   kibana:
     image: docker.elastic.co/kibana/kibana:7.14.0
-    restart: always
+    restart: on-failure
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
     ports:
@@ -156,19 +156,20 @@ services:
     networks:
       - microbot_network
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
 
-  # Filebeat - Log Toplayıcı
   filebeat:
     image: docker.elastic.co/beats/filebeat:7.14.0
-    restart: always
+    restart: on-failure
     volumes:
       - ./monitoring/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - ./logs:/logs:ro
     networks:
       - microbot_network
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     command: filebeat -e -strict.perms=false
 
 networks:
@@ -180,4 +181,4 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
-  elasticsearch_data: 
+  elasticsearch_data:

@@ -5,15 +5,25 @@ from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 import uvicorn
 import asyncio
 import json
+import sys
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 import time
+import uuid
+
+# Temel logging ayarlarını yap
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 from app.database import SessionLocal, engine, get_db
 from app.models.base import Base
@@ -34,6 +44,8 @@ from app.models.schedule import Schedule, ScheduleStatus
 from app.services.auth_service import get_current_user
 from app.core.logging import logger, get_logger
 from prometheus_fastapi_instrumentator import Instrumentator
+from app.services.websocket_manager import websocket_manager
+from app.services.sse_manager import sse_manager
 
 # Uygulama logger'ı
 logger = logging.getLogger("app.main")
@@ -42,8 +54,10 @@ logger = logging.getLogger("app.main")
 uvicorn_logger_names = ["uvicorn", "uvicorn.error", "uvicorn.access"]
 for logger_name in uvicorn_logger_names:
     uvicorn_logger = logging.getLogger(logger_name)
-    uvicorn_logger.handlers = []  # Mevcut handler'ları temizle
-    uvicorn_logger.propagate = False  # Ana logger'a log gönderme
+    if not uvicorn_logger.handlers:
+        uvicorn_logger.handlers = logger.handlers  # Ana logger ile aynı handlerları kullan
+    uvicorn_logger.setLevel(logging.INFO)
+    uvicorn_logger.propagate = True  # Ana logger'a log gönder
 
 # Websocket logger'ı
 websocket_logger = logging.getLogger("app")
@@ -79,6 +93,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"Veritabanı bağlantı hatası: {str(e)}")
         finally:
             db.close()
+        
+        # SSE ve WebSocket Manager temizlik görevlerini başlat
+        try:
+            websocket_manager.start_cleanup_task()
+            sse_manager.start_cleanup_task()
+            logger.info("WebSocket ve SSE temizlik görevleri başlatıldı")
+        except Exception as e:
+            logger.error(f"Temizlik görevlerini başlatma hatası: {str(e)}, uygulama devam ediyor")
             
         logger.info("Uygulama başlatıldı")
     except Exception as e:
@@ -94,6 +116,10 @@ async def lifespan(app: FastAPI):
 
         # Tüm Telegram handler'larını durdur
         await stop_all_telegram_handlers()
+        
+        # WebSocket ve SSE Manager temizlik görevlerini durdur
+        websocket_manager.stop_cleanup_task()
+        sse_manager.stop_cleanup_task()
         
         logger.info("Uygulama düzgün şekilde kapatıldı")
     except Exception as e:
@@ -141,11 +167,16 @@ app.openapi = custom_openapi
 # CORS ayarları
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["http://localhost:5176", "http://localhost:5175", "http://localhost:5174", "http://localhost:3000", "http://localhost:8000", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600
 )
+
+# Statik dosyaları servis et
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # İstek işleme süresi middleware'i
 @app.middleware("http")
@@ -189,21 +220,21 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 # API router'ını ekle
-app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix="/api")
 
 # Router'ları ekle - özel prefixleri olanlar
-app.include_router(telegram_auth)  # Bu router kendi içinde /api/telegram prefix'ini içeriyor
-app.include_router(telegram_sessions)  # Bu router kendi içinde /api/telegram prefix'ini içeriyor
-app.include_router(scheduler)  # Bu router kendi içinde /api/scheduler prefix'ini içeriyor
-app.include_router(message_template)  # Bu router kendi içinde /api/message-templates prefix'ini içeriyor
+app.include_router(telegram_auth, prefix="/api")
+app.include_router(telegram_sessions, prefix="/api")
+app.include_router(scheduler, prefix="/api")
+app.include_router(message_template, prefix="/api")
 
 # Standart prefixli router'lar 
-app.include_router(auth, prefix=settings.API_V1_STR)
-app.include_router(groups, prefix=settings.API_V1_STR)
-app.include_router(messages, prefix=settings.API_V1_STR)
-app.include_router(logs, prefix=settings.API_V1_STR)
-app.include_router(auto_reply, prefix=settings.API_V1_STR)
-app.include_router(dashboard, prefix=settings.API_V1_STR)
+app.include_router(auth, prefix="/api")
+app.include_router(groups, prefix="/api")
+app.include_router(messages, prefix="/api")
+app.include_router(logs, prefix="/api")
+app.include_router(auto_reply, prefix="/api")
+app.include_router(dashboard, prefix="/api")
 
 # Veritabanı bağımlılığı
 def get_db():
@@ -269,19 +300,38 @@ def root():
     return {"message": f"MicroBot API'ye Hoş Geldiniz! Belgelere /docs adresinden erişebilirsiniz."}
 
 # Sağlık kontrolü
-@app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 async def health_check():
-    # Aktif handler ve zamanlayıcı sayılarını da ekle
-    return {
-        "success": True,
-        "message": "Sistem sağlıklı",
-        "data": {
+    """Sistem sağlık durumunu kontrol eder"""
+    try:
+        # Veritabanı bağlantısını kontrol et
+        db = SessionLocal()
+        try:
+            from sqlalchemy import text
+            db.execute(text("SELECT 1"))
+            db_status = "healthy"
+        except Exception as e:
+            db_status = f"error: {str(e)}"
+        finally:
+            db.close()
+
+        # Aktif handler ve zamanlayıcı sayılarını da ekle
+        active_handlers = len(active_telegram_instances)
+        active_scheduler_count = sum(1 for status in active_schedulers.values() if status)
+
+        return {
             "status": "healthy",
-            "time": datetime.utcnow(),
-            "active_handlers": len(active_telegram_instances),
-            "active_schedulers": len(active_schedulers)
+            "timestamp": datetime.utcnow().isoformat(),
+            "database": db_status,
+            "active_handlers": active_handlers,
+            "active_schedulers": active_scheduler_count
         }
-    }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 # Sistem durumu
 @app.get("/system/status", tags=["System"])
@@ -321,30 +371,242 @@ async def restart_handlers():
         )
 
 # WebSocket endpoint
-@app.websocket("/ws")
+@app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    client_id = f"anonymous_{datetime.now().timestamp()}"
+    """WebSocket bağlantısını yönetir"""
+    client_id = str(uuid.uuid4())
+    
+    # WebSocketManager.handle_websocket metodunu kullan
+    await websocket_manager.handle_websocket(websocket, client_id)
+
+# SSE için mesaj broadcast endpoint'i
+@app.post("/api/sse/broadcast")
+async def broadcast_message(message: dict, request: Request):
+    """Tüm SSE istemcilerine mesaj yayınlar"""
     try:
-        await websocket_manager.connect(websocket, client_id)
-        await websocket.send_json({"type": "connection_established", "client_id": client_id})
-        
-        while True:
-            data = await websocket.receive_text()
-            try:
-                message = json.loads(data)
-                # Mesaj işleme
-                await websocket.send_json({"type": "message_received", "data": message})
-            except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Geçersiz JSON formatı"})
-    except WebSocketDisconnect:
-        await websocket_manager.disconnect(websocket, client_id)
+        # Mesajı tüm SSE istemcilerine yayınla
+        await sse_manager.broadcast({
+            "type": "broadcast",
+            "content": message,
+            "sender_ip": request.client.host if request.client else "unknown",
+            "timestamp": datetime.now().isoformat()
+        })
+        return {
+            "success": True,
+            "message": "Mesaj başarıyla yayınlandı",
+            "timestamp": datetime.now().isoformat()
+        }
     except Exception as e:
-        logger.error(f"WebSocket hatası: {str(e)}")
+        logger.error(f"SSE broadcast hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Mesaj yayınlama hatası: {str(e)}"
+        )
+
+# Server-Sent Events (SSE) endpoint
+@app.get("/api/sse")
+async def sse_endpoint(request: Request):
+    """Server-Sent Events (SSE) bağlantısını yönetir"""
+    client_id = str(uuid.uuid4())
+    user_id = "anonymous"
+    
+    # CORS kontrolü
+    origin = request.headers.get("Origin", "")
+    allowed_origins = [
+        "http://localhost:5176", 
+        "http://localhost:5175", 
+        "http://localhost:5174", 
+        "http://localhost:3000", 
+        "http://localhost:8000"
+    ]
+    if origin and origin not in allowed_origins and '*' not in app.middleware_stack._middlewares[0].options.get('allow_origins', []):
+        logger.warning(f"İzin verilmeyen kaynaktan SSE isteği: {origin}, client_ip: {request.client.host if request.client else 'unknown'}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu kaynaktan istek yapmaya yetkiniz yok"
+        )
+    
+    async def event_generator():
+        """SSE için event verisi üreten generator"""
         try:
-            await websocket_manager.disconnect(websocket, client_id)
-        except:
-            pass
+            # Bağlantı kurulduğunda başlangıç mesajı gönder
+            logger.info(f"SSE bağlantısı kuruldu: {client_id}, ip: {request.client.host if request.client else 'unknown'}")
+            yield f"data: {json.dumps({'type': 'connection', 'client_id': client_id, 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            # Message queue oluştur
+            message_queue = asyncio.Queue()
+            
+            # SSE Manager'e kaydol
+            await sse_manager.connect(client_id, message_queue)
+            
+            try:
+                # Ping mesajı göndermek için task oluştur
+                async def send_ping():
+                    while True:
+                        try:
+                            await asyncio.sleep(30)  # 30 saniyede bir ping gönder
+                            await message_queue.put({
+                                "type": "ping",
+                                "timestamp": datetime.now().isoformat()
+                            })
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            logger.error(f"SSE ping hatası: {str(e)}")
+                
+                # Ping task'ını başlat
+                ping_task = asyncio.create_task(send_ping())
+                
+                # Mesajları dinlemeye başla
+                while True:
+                    # Queue'dan mesaj al
+                    message = await message_queue.get()
+                    
+                    # Mesajı gönder
+                    yield f"data: {json.dumps(message)}\n\n"
+                    
+                    # Queue işlemi tamamlandı
+                    message_queue.task_done()
+                    
+            except asyncio.CancelledError:
+                logger.info(f"SSE bağlantısı kapatıldı: {client_id}")
+            except Exception as e:
+                logger.error(f"SSE akış hatası: {str(e)}")
+            finally:
+                # Temizlik işlemleri
+                ping_task.cancel()
+                await sse_manager.disconnect(client_id)
+                logger.info(f"SSE bağlantısı sonlandırıldı: {client_id}")
+        
+        except Exception as e:
+            logger.error(f"SSE generator hatası: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'timestamp': datetime.now().isoformat()})}\n\n"
+    
+    # SSE response döndür
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # NGINX için buffering'i devre dışı bırak
+            "Access-Control-Allow-Origin": origin or "*",  # CORS için origin header'ı
+            "Access-Control-Allow-Credentials": "true",    # Credentials (örn. cookie) gönderimi
+            "Access-Control-Expose-Headers": "*"          # Tüm özel headerları expose et
+        }
+    )
+
+# Telegram aktif oturum endpoint'i
+@app.get("/api/telegram/active-session")
+async def get_active_session():
+    """Aktif Telegram oturumunu döndürür"""
+    try:
+        # Aktif oturum bilgilerini al
+        active_session = {
+            "is_active": True,
+            "timestamp": datetime.now().isoformat()
+        }
+        return active_session
+    except Exception as e:
+        logger.error(f"Aktif oturum bilgisi alınamadı: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Aktif oturum bilgisi alınamadı"
+        )
+
+# SSE Test sayfası endpoint'i
+@app.get("/sse-test", include_in_schema=False)
+async def sse_test():
+    """SSE test sayfasını döndürür"""
+    from fastapi.responses import FileResponse
+    return FileResponse("app/static/sse_test.html")
+
+# SSE için konuya abone olma endpoint'i
+@app.post("/api/sse/subscribe/{client_id}/{topic}")
+async def subscribe_to_topic(client_id: str, topic: str):
+    """Bir istemciyi belirli bir konuya abone eder"""
+    try:
+        success = await sse_manager.subscribe(client_id, topic)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"İstemci bulunamadı veya abone olunamadı: {client_id}"
+            )
+        return {
+            "success": True,
+            "message": f"İstemci {topic} konusuna abone oldu",
+            "data": {
+                "client_id": client_id,
+                "topic": topic,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SSE abonelik hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Abonelik hatası: {str(e)}"
+        )
+
+# SSE için konuya mesaj yayınlama endpoint'i
+@app.post("/api/sse/publish/{topic}")
+async def publish_to_topic(topic: str, message: dict):
+    """Belirli bir konuya abone olan tüm istemcilere mesaj yayınlar"""
+    try:
+        recipient_count = await sse_manager.publish_to_topic(topic, {
+            "type": "topic_message",
+            "content": message,
+            "timestamp": datetime.now().isoformat()
+        })
+        return {
+            "success": True,
+            "message": f"Mesaj başarıyla {recipient_count} alıcıya yayınlandı",
+            "data": {
+                "topic": topic,
+                "recipients": recipient_count,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"SSE konu yayınlama hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Konu yayınlama hatası: {str(e)}"
+        )
+
+# SSE istatistikleri endpoint'i
+@app.get("/api/sse/stats", tags=["SSE"])
+async def get_sse_stats():
+    """SSE yöneticisi hakkında istatistikler döndürür"""
+    try:
+        stats = sse_manager.get_stats()
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"SSE istatistik hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"İstatistik alma hatası: {str(e)}"
+        )
 
 # Geliştirme sunucusunu çalıştır
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    try:
+        print("MicroBot başlatılıyor... Lütfen bekleyin.")
+        print("Uvicorn başlatma...")
+        import uvicorn
+        uvicorn.run(
+            "app.main:app", 
+            host="0.0.0.0", 
+            port=8000,  # 8001 yerine 8000 portu kullan
+            log_level="info",
+            log_config=None,  # Varsayılan ayarları kullan
+            access_log=True
+        )
+    except Exception as e:
+        print(f"Başlatma hatası: {str(e)}")

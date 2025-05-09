@@ -614,6 +614,103 @@ class WebSocketManager:
             reconnect_manager.connection_failed(client_id, reason=str(e))
             return False
 
+    async def handle_websocket(self, websocket: WebSocket, client_id: str):
+        """WebSocket bağlantısını yönetir ve mesaj döngüsünü işler"""
+        try:
+            user_id = "anonymous"  # Varsayılan kullanıcı ID'si
+            
+            # Bağlantıyı başlat
+            logger.info(f"WebSocket bağlantısı başlatılıyor: {client_id}")
+            await self.connect(websocket, user_id, client_id)
+            
+            # Mesaj dinleme döngüsü
+            while True:
+                try:
+                    # Gelen mesajı bekle
+                    data = await websocket.receive_text()
+                    
+                    # Gelen veriyi JSON olarak parse et
+                    try:
+                        message = json.loads(data)
+                        message_type = message.get("type", "message")
+                        
+                        logger.info(f"Alınan mesaj: {message_type} - {client_id}")
+                        
+                        # Mesaj türüne göre işlem yap
+                        if message_type == "ping":
+                            # Ping yanıtı gönder
+                            await websocket.send_json({
+                                "type": "pong",
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            
+                        elif message_type == "subscribe":
+                            # Kanal aboneliği
+                            channel = message.get("channel")
+                            if channel:
+                                await self.subscribe(client_id, channel)
+                                await websocket.send_json({
+                                    "type": "subscription",
+                                    "status": "subscribed",
+                                    "channel": channel
+                                })
+                                
+                        elif message_type == "unsubscribe":
+                            # Kanal aboneliğini kaldır
+                            channel = message.get("channel")
+                            if channel:
+                                await self.unsubscribe(client_id, channel)
+                                await websocket.send_json({
+                                    "type": "subscription",
+                                    "status": "unsubscribed",
+                                    "channel": channel
+                                })
+                                
+                        elif message_type == "broadcast":
+                            # Yayın mesajı
+                            content = message.get("content")
+                            if content:
+                                # Mesajı yayınla
+                                await self.broadcast(content)
+                                
+                        else:
+                            # Bilinmeyen mesaj türü için basit echo
+                            await websocket.send_json({
+                                "type": "echo",
+                                "content": message,
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            
+                    except json.JSONDecodeError:
+                        logger.warning(f"Geçersiz JSON formatı: {client_id}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Geçersiz JSON formatı",
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        
+                except WebSocketDisconnect:
+                    logger.info(f"WebSocket bağlantısı kesildi: {client_id}")
+                    break
+                    
+                except Exception as e:
+                    logger.error(f"WebSocket mesaj işleme hatası: {str(e)}")
+                    await self.handle_connection_error(client_id)
+                    break
+                    
+        except Exception as e:
+            logger.error(f"WebSocket yönetim hatası: {str(e)}")
+            report_websocket_error(
+                error=e,
+                source="WebSocketManager.handle_websocket",
+                context={"client_id": client_id}
+            )
+            
+        finally:
+            # Bağlantı kapatma
+            await self.disconnect(client_id)
+            logger.info(f"WebSocket bağlantı yönetimi tamamlandı: {client_id}")
+
 # Global WebSocket yöneticisi örneği singleton pattern ile
 _websocket_manager_instance = None
 
