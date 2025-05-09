@@ -16,7 +16,8 @@
     # Bağımlılıkları yükle
     COPY requirements.prod.txt .
     RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-        pip install --no-cache-dir -r requirements.prod.txt
+        pip install --no-cache-dir --no-deps -r requirements.prod.txt
+
     
     # -------- Runtime Stage --------
     FROM python:3.11-slim
