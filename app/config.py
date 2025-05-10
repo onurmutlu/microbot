@@ -74,7 +74,12 @@ class Settings(BaseSettings):
             os.makedirs(self.LOGS_DIR)
             
         # Sessions klasörünü oluştur
-        if not os.path.exists(self.SESSION_DIR):
-            os.makedirs(self.SESSION_DIR)
+        # Güvenli bir şekilde klasör oluştur
+        try:
+            os.makedirs(self.LOGS_DIR, exist_ok=True)
+            os.makedirs(self.SESSION_DIR, exist_ok=True)
+        except PermissionError as e:
+            print(f"[WARNING] Klasör oluşturulamadı: {e}")
+
 
 settings = Settings()
