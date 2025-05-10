@@ -300,33 +300,18 @@ def root():
     return {"message": f"MicroBot API'ye Hoş Geldiniz! Belgelere /docs adresinden erişebilirsiniz."}
 
 # Sağlık kontrolü
-@app.get("/api/health", tags=["Health"])
+@app.get("/health", tags=["Health"])
 async def health_check():
-    """Sistem sağlık durumunu kontrol eder"""
+    """Sistem sağlık kontrolü için basit endpoint"""
     try:
-        # Veritabanı bağlantısını kontrol et
-        db = SessionLocal()
-        try:
-            from sqlalchemy import text
-            db.execute(text("SELECT 1"))
-            db_status = "healthy"
-        except Exception as e:
-            db_status = f"error: {str(e)}"
-        finally:
-            db.close()
-
-        # Aktif handler ve zamanlayıcı sayılarını da ekle
-        active_handlers = len(active_telegram_instances)
-        active_scheduler_count = sum(1 for status in active_schedulers.values() if status)
-
         return {
-            "status": "healthy",
+            "status": "ok",
             "timestamp": datetime.utcnow().isoformat(),
-            "database": db_status,
-            "active_handlers": active_handlers,
-            "active_schedulers": active_scheduler_count
+            "service": settings.PROJECT_NAME,
+            "version": settings.VERSION
         }
     except Exception as e:
+        logger.error(f"Sağlık kontrolü hatası: {str(e)}")
         return {
             "status": "error",
             "error": str(e),
