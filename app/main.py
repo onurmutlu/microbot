@@ -5,7 +5,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI, Depends, HTTPException, status, Request, WebSocket, WebSocketDisconnect, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 import time
 import uuid
+import psutil
 
 # Temel logging ayarlarını yap
 logging.basicConfig(
@@ -33,6 +34,8 @@ from app.routers.telegram_sessions import router as telegram_sessions
 from app.services.scheduled_messaging import get_scheduled_messaging_service
 from app.config import settings
 from app.api.v1.endpoints import router as api_router
+from app.api.v1.endpoints.ai_insights import router as ai_insights_router
+from app.api.v1.endpoints.graphql.router import router as graphql_router
 from app.services.telegram_service import TelegramService
 from app.core.websocket import websocket_manager
 from app.models.user import User
@@ -46,6 +49,9 @@ from app.core.logging import logger, get_logger
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.services.websocket_manager import websocket_manager
 from app.services.sse_manager import sse_manager
+from app.services.cache_service import cache_service
+from app.middleware.rate_limiter import add_rate_limiter
+from app.middleware.cors import setup_secure_cors
 
 # Uygulama logger'ı
 logger = logging.getLogger("app.main")
@@ -85,6 +91,13 @@ async def lifespan(app: FastAPI):
             from sqlalchemy import text
             db.execute(text("SELECT 1"))
             logger.info("Veritabanı bağlantısı başarılı")
+            
+            # Redis önbellekleme servisini başlat
+            if settings.CACHE_ENABLED:
+                await cache_service.init()
+                logger.info("Redis önbellekleme servisi başlatıldı")
+            else:
+                logger.info("Redis önbellekleme devre dışı bırakıldı")
             
             # Aktif tüm kullanıcıların otomatik başlatması
             await start_telegram_handlers_for_all_users(db)
@@ -222,6 +235,10 @@ async def general_exception_handler(request: Request, exc: Exception):
 # API router'ını ekle
 app.include_router(api_router, prefix="/api")
 
+# AI ve GraphQL router'larını ekle
+app.include_router(ai_insights_router, prefix="/api/v1")
+app.include_router(graphql_router, prefix="/api/v1")
+
 # Router'ları ekle - özel prefixleri olanlar
 app.include_router(telegram_auth, prefix="/api")
 app.include_router(telegram_sessions, prefix="/api")
@@ -300,16 +317,124 @@ def root():
     return {"message": f"MicroBot API'ye Hoş Geldiniz! Belgelere /docs adresinden erişebilirsiniz."}
 
 # Sağlık kontrolü
-@app.get("/health", tags=["Health"])
-async def health_check():
-    """Sistem sağlık kontrolü için basit endpoint"""
+@app.get("/health", tags=["Health"], operation_id="main_health_check")
+async def health_check(db: Session = Depends(get_db)):
+    """
+    Sistem sağlık kontrolü için kapsamlı endpoint.
+    Veritabanı bağlantısı, telegram servisi durumu ve sistem kaynaklarını kontrol eder.
+    """
+    start_time = time.time()
+    health_data = {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "checks": {}
+    }
+    
     try:
-        return {
+        # Veritabanı bağlantı kontrolü
+        try:
+            from sqlalchemy import text
+            db.execute(text("SELECT 1"))
+            health_data["checks"]["database"] = {
+                "status": "ok",
+                "message": "Veritabanı bağlantısı aktif"
+            }
+        except Exception as e:
+            health_data["status"] = "error"
+            health_data["checks"]["database"] = {
+                "status": "error",
+                "message": f"Veritabanı bağlantı hatası: {str(e)}"
+            }
+        
+        # Redis bağlantı kontrolü (önbellekleme)
+        if settings.CACHE_ENABLED:
+            try:
+                # Redis bağlantısı kontrolü
+                is_connected = await cache_service._redis.ping() if cache_service._redis else False
+                
+                if is_connected:
+                    health_data["checks"]["redis"] = {
+                        "status": "ok",
+                        "message": "Redis bağlantısı aktif"
+                    }
+                else:
+                    health_data["status"] = "warning"
+                    health_data["checks"]["redis"] = {
+                        "status": "warning",
+                        "message": "Redis bağlantısı kurulamadı"
+                    }
+            except Exception as e:
+                health_data["status"] = "warning"
+                health_data["checks"]["redis"] = {
+                    "status": "error",
+                    "message": f"Redis bağlantı hatası: {str(e)}"
+                }
+        else:
+            health_data["checks"]["redis"] = {
+                "status": "disabled",
+                "message": "Redis önbelleği devre dışı"
+            }
+        
+        # Sistem kaynaklarını kontrol et
+        memory = psutil.virtual_memory()
+        health_data["checks"]["system"] = {
             "status": "ok",
-            "timestamp": datetime.utcnow().isoformat(),
-            "service": settings.PROJECT_NAME,
-            "version": settings.VERSION
+            "cpu_percent": psutil.cpu_percent(),
+            "memory_usage_percent": memory.percent,
+            "memory_available_mb": round(memory.available / (1024 * 1024), 2)
         }
+        
+        # Aktif telegram instance sayısı
+        health_data["checks"]["telegram"] = {
+            "status": "ok",
+            "active_instances": len(active_telegram_instances),
+            "active_schedulers": len(active_schedulers)
+        }
+        
+        # Check disk space
+        disk = psutil.disk_usage('/')
+        health_data["checks"]["disk"] = {
+            "status": "ok",
+            "free_space_gb": round(disk.free / (1024 * 1024 * 1024), 2),
+            "used_percent": disk.percent
+        }
+        
+        # Metrics durumu (Prometheus)
+        if settings.METRICS_ENABLED:
+            health_data["checks"]["metrics"] = {
+                "status": "ok",
+                "provider": "prometheus",
+                "endpoint": settings.METRICS_PATH
+            }
+        else:
+            health_data["checks"]["metrics"] = {
+                "status": "disabled",
+                "message": "Prometheus metrikleri devre dışı"
+            }
+        
+        # GraphQL durumu
+        if settings.GRAPHQL_ENABLED:
+            health_data["checks"]["graphql"] = {
+                "status": "ok",
+                "endpoint": settings.GRAPHQL_PATH,
+                "graphiql": settings.GRAPHIQL_ENABLED
+            }
+        else:
+            health_data["checks"]["graphql"] = {
+                "status": "disabled",
+                "message": "GraphQL API devre dışı"
+            }
+        
+        # Response time
+        health_data["response_time_ms"] = round((time.time() - start_time) * 1000, 2)
+        
+        # Uygulama hazır olma durumu
+        overall_status = health_data["status"]
+        health_data["ready"] = overall_status == "ok"
+        
+        return health_data
     except Exception as e:
         logger.error(f"Sağlık kontrolü hatası: {str(e)}")
         return {
@@ -365,7 +490,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket_manager.handle_websocket(websocket, client_id)
 
 # SSE için mesaj broadcast endpoint'i
-@app.post("/api/sse/broadcast")
+@app.post("/api/sse/broadcast", operation_id="main_sse_broadcast")
 async def broadcast_message(message: dict, request: Request):
     """Tüm SSE istemcilerine mesaj yayınlar"""
     try:
@@ -482,7 +607,7 @@ async def sse_endpoint(request: Request):
     )
 
 # Telegram aktif oturum endpoint'i
-@app.get("/api/telegram/active-session")
+@app.get("/api/telegram/active-session", operation_id="main_get_active_session")
 async def get_active_session():
     """Aktif Telegram oturumunu döndürür"""
     try:
@@ -506,8 +631,201 @@ async def sse_test():
     from fastapi.responses import FileResponse
     return FileResponse("app/static/sse_test.html")
 
+# API Test sayfası endpoint'i
+@app.get("/api-test", include_in_schema=False)
+async def api_test():
+    """API test sayfasını döndürür"""
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>MicroBot API Test</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #f8f9fa;
+                color: #333;
+            }
+            .container {
+                max-width: 1000px;
+                margin: 0 auto;
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #4a6cf7;
+                border-bottom: 2px solid #eaeaea;
+                padding-bottom: 10px;
+            }
+            h2 {
+                margin-top: 30px;
+                color: #5a5a5a;
+            }
+            .endpoint {
+                background-color: #f1f5ff;
+                padding: 15px;
+                border-radius: 6px;
+                margin: 15px 0;
+                border-left: 4px solid #4a6cf7;
+            }
+            .endpoint h3 {
+                margin-top: 0;
+                color: #4a6cf7;
+            }
+            pre {
+                background-color: #f5f5f5;
+                padding: 10px;
+                border-radius: 4px;
+                overflow-x: auto;
+            }
+            .method {
+                display: inline-block;
+                padding: 3px 8px;
+                border-radius: 4px;
+                font-weight: bold;
+                margin-right: 8px;
+            }
+            .get { background-color: #e7f5ff; color: #0066cc; }
+            .post { background-color: #e3f9e5; color: #00994c; }
+            .info {
+                background-color: #fffaeb;
+                padding: 10px;
+                border-radius: 4px;
+                margin: 15px 0;
+                border-left: 4px solid #ffcc00;
+            }
+            .graphql-container {
+                margin-top: 30px;
+            }
+            .btn {
+                background-color: #4a6cf7;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: background-color 0.3s;
+            }
+            .btn:hover {
+                background-color: #3a5ce5;
+            }
+            #health-result, #graphql-result {
+                margin-top: 15px;
+                min-height: 50px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>MicroBot API Test</h1>
+            
+            <div class="info">
+                Bu sayfa, MicroBot API'lerini test etmek ve kullanımlarını göstermek için tasarlanmıştır.
+            </div>
+            
+            <h2>API Sağlık Kontrolü</h2>
+            <div class="endpoint">
+                <h3><span class="method get">GET</span> /health</h3>
+                <p>API'nin sağlık durumunu kontrol eder. Veritabanı, Redis, Prometheus ve diğer servislerin durumunu döndürür.</p>
+                <button id="check-health" class="btn">Sağlık Kontrolü Yap</button>
+                <div id="health-result"></div>
+            </div>
+            
+            <div class="graphql-container">
+                <h2>GraphQL API</h2>
+                <div class="endpoint">
+                    <h3><span class="method post">POST</span> /api/v1/graphql</h3>
+                    <p>GraphQL API endpoint'i. Grup içgörüleri, mesaj optimizasyonu gibi işlemler için kullanılabilir.</p>
+                    <button id="check-graphql" class="btn">GraphQL Bilgisi Al</button>
+                    <div id="graphql-result"></div>
+                </div>
+                
+                <h3>Örnek GraphQL Sorguları</h3>
+                <pre>
+query GetGroupInsights($groupId: Int!) {
+  group_content_insights(group_id: $groupId) {
+    status
+    message_count
+    success_rate
+    recommendations {
+      type
+      message
+    }
+  }
+}
+
+mutation OptimizeMessage($message: String!, $groupId: Int!) {
+  optimize_message(message: $message, group_id: $groupId) {
+    original_message
+    optimized_message
+    applied_optimizations {
+      type
+      message
+    }
+  }
+}
+                </pre>
+            </div>
+            
+            <h2>AI Endpoints</h2>
+            <div class="endpoint">
+                <h3><span class="method get">GET</span> /api/v1/ai/group-insights/{group_id}</h3>
+                <p>Bir grubun içerik analizini ve performans önerilerini döndürür.</p>
+            </div>
+            <div class="endpoint">
+                <h3><span class="method post">POST</span> /api/v1/ai/optimize-message</h3>
+                <p>Verilen mesajı belirtilen grup için optimize eder.</p>
+            </div>
+            <div class="endpoint">
+                <h3><span class="method post">POST</span> /api/v1/ai/batch-analyze</h3>
+                <p>Birden fazla grubu toplu olarak analiz eder.</p>
+            </div>
+        </div>
+        
+        <script>
+            document.getElementById('check-health').addEventListener('click', async () => {
+                const resultDiv = document.getElementById('health-result');
+                resultDiv.innerHTML = 'Kontrol ediliyor...';
+                
+                try {
+                    const response = await fetch('/health');
+                    const data = await response.json();
+                    
+                    resultDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } catch (error) {
+                    resultDiv.innerHTML = `<p style="color: red">Hata: ${error.message}</p>`;
+                }
+            });
+            
+            document.getElementById('check-graphql').addEventListener('click', async () => {
+                const resultDiv = document.getElementById('graphql-result');
+                resultDiv.innerHTML = 'Kontrol ediliyor...';
+                
+                try {
+                    const response = await fetch('/api/v1/graphql');
+                    const data = await response.json();
+                    
+                    resultDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } catch (error) {
+                    resultDiv.innerHTML = `<p style="color: red">Hata: ${error.message}</p>`;
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
+
 # SSE için konuya abone olma endpoint'i
-@app.post("/api/sse/subscribe/{client_id}/{topic}")
+@app.post("/api/sse/subscribe/{client_id}/{topic}", operation_id="main_sse_subscribe")
 async def subscribe_to_topic(client_id: str, topic: str):
     """Bir istemciyi belirli bir konuya abone eder"""
     try:
@@ -536,7 +854,7 @@ async def subscribe_to_topic(client_id: str, topic: str):
         )
 
 # SSE için konuya mesaj yayınlama endpoint'i
-@app.post("/api/sse/publish/{topic}")
+@app.post("/api/sse/publish/{topic}", operation_id="main_sse_publish")
 async def publish_to_topic(topic: str, message: dict):
     """Belirli bir konuya abone olan tüm istemcilere mesaj yayınlar"""
     try:
@@ -562,7 +880,7 @@ async def publish_to_topic(topic: str, message: dict):
         )
 
 # SSE istatistikleri endpoint'i
-@app.get("/api/sse/stats", tags=["SSE"])
+@app.get("/api/sse/stats", tags=["SSE"], operation_id="main_get_sse_stats")
 async def get_sse_stats():
     """SSE yöneticisi hakkında istatistikler döndürür"""
     try:

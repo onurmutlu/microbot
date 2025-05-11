@@ -18,130 +18,103 @@ class GroupAnalyzer:
         self.db: Session = SessionLocal()
 
     async def analyze_user_groups(self, user_id: int) -> List[Dict[str, Any]]:
-        """Kullanıcının dahil olduğu grupları analiz eder"""
-        # Kullanıcının olduğu tüm dialog'ları çek
+        """Kullanıcının üye olduğu grupları analiz et"""
         try:
+            # Kullanıcının gruplarını çek
             dialogs = await self.client.get_dialogs()
-            group_results = []
+            groups = []
             
-            # Sadece grup ve kanalları filtrele
-            groups = [dialog.entity for dialog in dialogs if isinstance(dialog.entity, (Channel, Chat))]
+            for dialog in dialogs:
+                if isinstance(dialog.entity, (Channel, Chat)):
+                    # Grup bilgilerini topla
+                    group_info = await self._analyze_group(dialog.entity)
+                    groups.append(group_info)
+                    
+                    # Veritabanında güncelle
+                    await self._update_group_db(user_id, group_info)
             
-            for group in groups:
-                # Grup analizi yap
-                group_info = await self._analyze_group(group)
-                group_results.append(group_info)
-            
-            # Sonuçları cache'le veya DB'ye kaydet
-            self._save_group_analysis(user_id, group_results)
-            
-            return group_results
+            return groups
             
         except Exception as e:
-            logger.error(f"Grup analizi sırasında hata: {str(e)}")
-            return []
+            logger.error(f"Error analyzing user groups: {str(e)}")
+            raise
 
     async def _analyze_group(self, group: Union[Channel, Chat]) -> Dict[str, Any]:
-        """Bir grubu analiz eder ve istatistikleri döndürür"""
-        group_info = {
-            'id': group.id,
-            'title': group.title,
-            'type': 'channel' if isinstance(group, Channel) else 'group',
-            'member_count': getattr(group, 'participants_count', 0),
-            'analyzed_at': datetime.now().isoformat()
-        }
-        
+        """Grup detaylarını analiz et"""
         try:
-            # Son mesajları çek
+            # Grup istatistiklerini topla
+            participants = await self.client.get_participants(group)
             messages = await self.client.get_messages(group, limit=100)
             
-            # Mesaj istatistikleri
-            message_count = len(messages)
-            message_authors = {}
-            topics = {}
+            # Aktivite analizi
+            active_users = len([p for p in participants if p.status is not None])
+            recent_messages = len(messages)
             
+            # Mesaj saatleri analizi
+            activity_hours = {}
             for msg in messages:
-                if msg.sender_id:
-                    if msg.sender_id not in message_authors:
-                        message_authors[msg.sender_id] = 0
-                    message_authors[msg.sender_id] += 1
-                
-                # Mesaj konuları analizi (basit)
-                if msg.text:
-                    words = msg.text.lower().split()
-                    for word in words:
-                        if len(word) > 4:  # kısa kelimeleri atla
-                            if word not in topics:
-                                topics[word] = 0
-                            topics[word] += 1
+                hour = msg.date.hour
+                activity_hours[hour] = activity_hours.get(hour, 0) + 1
             
-            # En aktif kullanıcılar
-            top_authors = sorted(message_authors.items(), key=lambda x: x[1], reverse=True)[:5]
+            # En aktif saatler
+            most_active_hours = sorted(activity_hours.items(), key=lambda x: x[1], reverse=True)
+            top_hours = [hour for hour, _ in most_active_hours[:3]] if most_active_hours else []
             
-            # En yaygın konular
-            top_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:10]
+            # Grup kategorisini belirle
+            category = await self._determine_group_category(group, messages)
             
-            # İstatistikleri ekle
-            group_info.update({
-                'message_count': message_count,
-                'active_users': len(message_authors),
-                'top_authors': [{'id': a[0], 'message_count': a[1]} for a in top_authors],
-                'top_topics': [{'word': t[0], 'count': t[1]} for t in top_topics],
-            })
-        
+            return {
+                "id": group.id,
+                "title": group.title,
+                "username": getattr(group, "username", None),
+                "participants_count": len(participants),
+                "active_users": active_users,
+                "recent_messages": recent_messages,
+                "category": category,
+                "activity_hours": activity_hours,
+                "top_active_hours": top_hours,
+                "last_analyzed": datetime.now(),
+                "rules": await self._get_group_rules(group)
+            }
+            
         except Exception as e:
-            logger.error(f"Grup analizi ayrıntı hatası ({group.id}): {str(e)}")
+            logger.error(f"Error analyzing group {group.id}: {str(e)}")
+            raise
+
+    async def _determine_group_category(self, group: Union[Channel, Chat], messages: List[Any]) -> str:
+        """Grup kategorisini belirle"""
+        # Mesaj içeriklerini analiz et
+        content_types = {}
+        for msg in messages:
+            if msg.text:
+                content = msg.text.lower()
+                if "reklam" in content or "duyuru" in content:
+                    content_types["advertisement"] = content_types.get("advertisement", 0) + 1
+                elif "soru" in content or "yardım" in content:
+                    content_types["support"] = content_types.get("support", 0) + 1
+                elif "haber" in content or "güncel" in content:
+                    content_types["news"] = content_types.get("news", 0) + 1
         
-        return group_info
-        
-    def _save_group_analysis(self, user_id: int, group_results: List[Dict[str, Any]]) -> None:
-        """Grup analiz sonuçlarını veritabanına kaydeder"""
+        # En yaygın içerik tipine göre kategori belirle
+        if content_types:
+            return max(content_types.items(), key=lambda x: x[1])[0]
+        return "general"
+
+    async def _get_group_rules(self, group: Union[Channel, Chat]) -> Dict[str, Any]:
+        """Grup kurallarını çek"""
         try:
-            for group_data in group_results:
-                # Grup varsa güncelle, yoksa oluştur
-                group = self.db.query(Group).filter(Group.telegram_id == group_data['id']).first()
-                
-                if not group:
-                    group = Group(
-                        telegram_id=group_data['id'],
-                        title=group_data['title'],
-                        type=group_data['type'],
-                        member_count=group_data['member_count'],
-                        last_analyzed=datetime.now()
-                    )
-                    self.db.add(group)
-                else:
-                    # Mevcut grubu güncelle
-                    group.title = group_data['title']
-                    group.member_count = group_data['member_count']
-                    group.last_analyzed = datetime.now()
-                
-                # İşlemi veritabanında kaydet
-                self.db.commit()
-                
-                # JSON formatında istatistik verilerini kaydet
-                message_log = MessageLog(
-                    group_id=group.id,
-                    user_id=user_id,
-                    log_date=datetime.now(),
-                    message_count=group_data.get('message_count', 0),
-                    active_users=group_data.get('active_users', 0),
-                    statistics=json.dumps({
-                        'top_authors': group_data.get('top_authors', []),
-                        'top_topics': group_data.get('top_topics', [])
-                    })
-                )
-                self.db.add(message_log)
-                self.db.commit()
-                
+            # Grup açıklamasından kuralları çıkar
+            description = getattr(group, "about", "")
+            rules = {
+                "no_spam": "spam" in description.lower(),
+                "no_ads": "reklam" in description.lower(),
+                "no_links": "link" in description.lower(),
+                "no_media": "medya" in description.lower()
+            }
+            return rules
         except Exception as e:
-            self.db.rollback()
-            logger.error(f"Grup analiz sonuçları kaydedilirken hata: {str(e)}")
-    
-    def close(self) -> None:
-        """Kaynakları temizle"""
-        if self.db:
-            self.db.close()
+            logger.error(f"Error getting group rules: {str(e)}")
+            return {}
 
     async def _update_group_db(self, user_id: int, group_info: Dict[str, Any]) -> None:
         """Grup bilgilerini veritabanında güncelle"""

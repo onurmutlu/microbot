@@ -5,6 +5,7 @@ import secrets
 import hashlib
 from datetime import datetime, timedelta
 from typing import List, Optional
+from sqlalchemy import or_
 
 from app.database import get_db
 from app.models import User, ApiKey, UserActivity
@@ -160,7 +161,7 @@ def get_system_status(db: Session = Depends(get_db), current_user: User = Depend
     api_keys_count = db.query(ApiKey).count()
     active_api_keys = db.query(ApiKey).filter(
         ApiKey.is_active == True,
-        (ApiKey.expires_at == None) | (ApiKey.expires_at > datetime.utcnow())
+        or_(ApiKey.expires_at == None, ApiKey.expires_at > datetime.utcnow())
     ).count()
     
     # Döndürülecek durum bilgisi

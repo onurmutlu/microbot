@@ -53,7 +53,28 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: Optional[str] = None
-    
+    REDIS_DB: int = 0
+    REDIS_PREFIX: str = "microbot"
+    REDIS_TTL: int = 600  # 10 dakika
+
+    # Cache ayarları
+    CACHE_ENABLED: bool = True
+    DEFAULT_CACHE_TTL: int = 60  # 1 dakika
+
+    # GraphQL ayarları
+    GRAPHQL_ENABLED: bool = True
+    GRAPHQL_PATH: str = "/graphql"
+    GRAPHIQL_ENABLED: bool = True
+
+    # AI Özellikler
+    AI_FEATURES_ENABLED: bool = True
+    CONTENT_ANALYSIS_CACHE_TTL: int = 3600  # 1 saat
+    CONTENT_OPTIMIZATION_ENABLED: bool = True
+
+    # Prometheus metrikleri
+    METRICS_ENABLED: bool = True
+    METRICS_PATH: str = "/metrics"
+
     model_config = SettingsConfigDict(
         env_file=".env", 
         env_file_encoding="utf-8", 

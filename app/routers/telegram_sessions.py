@@ -75,7 +75,7 @@ def clean_expired_sessions():
         if phone in active_sessions:
             del active_sessions[phone]
 
-@router.post("/start-login", response_model=TelegramResponse)
+@router.post("/start-login", response_model=TelegramResponse, operation_id="telegram_start_login")
 async def start_telegram_login(
     request: TelegramLoginRequest,
     db: Session = Depends(get_db),
@@ -187,7 +187,7 @@ async def start_telegram_login(
             message=f"Oturum başlatma sırasında bir hata oluştu: {str(e)}"
         )
 
-@router.post("/confirm-code", response_model=TelegramResponse)
+@router.post("/confirm-code", response_model=TelegramResponse, operation_id="telegram_confirm_code")
 async def confirm_telegram_code(
     request: TelegramCodeConfirmRequest,
     db: Session = Depends(get_db),
@@ -321,7 +321,7 @@ async def confirm_telegram_code(
             message=f"Doğrulama sırasında bir hata oluştu: {str(e)}"
         )
 
-@router.post("/confirm-2fa-password", response_model=TelegramResponse)
+@router.post("/confirm-2fa-password", response_model=TelegramResponse, operation_id="telegram_confirm_2fa_password")
 async def confirm_2fa_password(
     request: Telegram2FARequest,
     db: Session = Depends(get_db),

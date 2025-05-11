@@ -2,6 +2,59 @@
 
 Bu proje, [Semantik Sürümleme](https://semver.org/lang/tr/) kurallarını takip etmektedir.
 
+## [Unreleased] - v1.6.0
+
+### Planlanmış Geliştirmeler
+- GraphQL API desteği
+- Prometheus entegrasyonu ile metrik toplama
+- Performans izleme dashboardu
+- Gerçek zamanlı olarak grup aktivite değişikliklerine adapte olma
+- Gelişmiş hata analizi ve raporlama
+
+### Planlanmış İyileştirmeler
+- Kullanıcı segmentasyonu sistemi
+- Çevrimdışı mesaj kuyruk yönetimini güçlendirme
+- Mesaj şablon önbelleğini optimize etme
+- Bot marketplace için altyapı
+- Güvenlik iyileştirmeleri
+  - API rate limiting implementasyonu
+  - İki faktörlü kimlik doğrulama
+  - IP kısıtlamaları güçlendirme
+
+## [v1.6.0] - 2025-05-12
+
+### Eklenen Özellikler
+- GraphQL API desteği eklendi (`/api/v1/graphql` endpoint'i)
+- AI destekli içerik optimizasyonu servisi (GroupAnalyzer ve ContentOptimizer)
+- Redis tabanlı önbellekleme sistemi ve decorator'lar
+- Prometheus entegrasyonu ile kapsamlı metrik toplama
+- Performans izleme metrikleri (API latency, veritabanı sorguları, önbellek vuruşları)
+- Sağlık kontrolü (`/health` endpoint'i) geliştirildi ve sistem kaynak kullanımı eklendi
+- Yeni API endpointleri:
+  - `/api/v1/ai/group-insights/{group_id}`
+  - `/api/v1/ai/optimize-message`
+  - `/api/v1/ai/batch-analyze`
+
+### İyileştirmeler
+- API operasyon ID'leri benzersiz hale getirildi
+- GraphiQL arayüzü eklendi (geliştirme modu için)
+- Grup analizi ve mesaj optimizasyonu için önbellekleme stratejileri
+- Metrik tabanlı hata izleme ve performans takibi
+- Model dosyaları için Python 3.9 uyumluluğu iyileştirmeleri
+- Gelişmiş hata işleme ve raporlama
+
+### Dokümantasyon
+- Frontend miniapp için geliştirme rehberi eklendi
+- GraphQL sorgu örnekleri dokümante edildi
+- API önbellek kullanımı dökümante edildi
+
+### v1.7.0 için Planlar
+- Daha kapsamlı AI içerik analizi ve NLP modeli entegrasyonu
+- Grafana dashboard'ları için özel metrik yapılandırmaları
+- Çoklu kullanıcı oturumları için gelişmiş izolasyon
+- Bulut depolama entegrasyonu
+- Docker Compose yapılandırması için Redis ve Prometheus eklentileri
+
 ## [1.5.0] - 2024-05-19
 
 ### WebSocket Manager Performans Optimizasyonu
@@ -31,12 +84,25 @@ Bu proje, [Semantik Sürümleme](https://semver.org/lang/tr/) kurallarını taki
 - Hata raporları ve hata istatistikleri için API desteği
 - Yeniden bağlanma durumu izleme ve yönetim API'leri eklendi
 - API dokümantasyonu güncellendi
+- API operasyon ID'leri standardize edildi (tekrarlanan ID'ler düzeltildi)
+- Gelişmiş sağlık kontrolü (Health Check) API'si eklendi
+  - Veritabanı bağlantı kontrolü
+  - Sistem kaynakları (CPU, bellek, disk) analizi
+  - Aktif Telegram ve scheduler durumu
+  - Yanıt süresi ölçümü
+
+### Grup Aktivite Analizi ve Akıllı Mesajlaşma
+- Grup aktivitesine dayalı optimal mesaj gönderme aralığı hesaplama
+- Hata durumlarında gruplar için otomatik soğutma mekanizması
+- Soğutma süresi, hata türüne göre dinamik olarak ayarlama
+- Grup performans metrikleri ve analitik toplama
 
 ### Altyapı Geliştirmeleri
 - WebSocket Manager başlatma hatası düzeltildi
 - Versiyon numarası güncellendi (1.4.0 -> 1.5.0)
 - Dokümantasyon güncellemeleri yapıldı
 - ROADMAP.md'de tamamlanan maddeler işaretlendi
+- Python 3.9 uyumluluğu için Union operatörü düzeltildi
 
 ## [1.4.1] - 2024-05-10
 

@@ -2,7 +2,7 @@
 
 Telegram gruplarını yönetmek için geliştirilmiş bir bot uygulaması.
 
-**Güncel Versiyon: v1.5.0** *(Bakınız: [CHANGELOG.md](CHANGELOG.md))*
+**Güncel Versiyon: v1.6.0** *(Bakınız: [CHANGELOG.md](CHANGELOG.md))*
 
 ## Özellikler
 
@@ -11,12 +11,18 @@ Telegram gruplarını yönetmek için geliştirilmiş bir bot uygulaması.
 - Zamanlanmış mesaj gönderimi
 - Otomatik bot başlatma
 - WebSocket tabanlı gerçek zamanlı veri senkronizasyonu
-- REST API
+- REST API ve GraphQL API desteği
 - Kullanıcı ve grup hedefleme
 - Güvenlik optimizasyonları ve hata düzeltmeleri
 - Gelişmiş hata raporlama sistemi
 - Otomatik yeniden bağlanma stratejileri
 - Performans optimizasyonları
+- Gelişmiş sağlık kontrolü API'si
+- Dinamik mesaj gönderme aralığı belirleme
+- Grup aktivitesine göre mesaj sıklığı optimizasyonu
+- AI destekli içerik analizi ve optimizasyonu
+- Prometheus ile metrik toplama ve performans izleme
+- Redis tabanlı önbellekleme
 
 ## Kurulum
 
@@ -77,6 +83,27 @@ Tetikleyici: r:ne zaman (.*?)
 Yanıt: {group1} hakkında yakında bilgi vereceğim!
 ```
 
+## Akıllı Mesaj Zamanlama Sistemi
+
+MicroBot, grupların aktivite seviyesine göre dinamik mesaj gönderme aralıkları sunar:
+
+- Grup aktivitesine dayalı optimal gönderim aralığı hesaplama
+- Hata durumlarında otomatik "soğutma" mekanizması
+- FloodWait, ChatWriteForbidden gibi hatalara karşı koruma
+- Grup bazlı zamanlama istatistikleri ve optimizasyon
+
+Zamanlama sistemi API'leri:
+```bash
+# Gruptaki optimal mesaj aralıklarını almak için
+GET /api/dashboard/optimal-intervals
+
+# Soğutma modundaki grupları görmek için
+GET /api/dashboard/cooled-groups
+
+# Zamanlanmış mesaj istatistiklerini görmek için
+GET /api/dashboard/scheduled-stats
+```
+
 ## Gerçek Zamanlı Veri Senkronizasyonu
 
 MicroBot, WebSocket tabanlı gerçek zamanlı veri güncellemesi sunar:
@@ -99,6 +126,9 @@ GET /system/status
 
 # Tüm handler'ları yeniden başlatmak için
 POST /system/restart-handlers
+
+# Detaylı sağlık kontrolü için
+GET /health
 ```
 
 ## API Dokümantasyonu
@@ -112,7 +142,7 @@ http://localhost:8000/docs
 
 WebSocket bağlantısı için:
 ```
-ws://localhost:8000/ws/{client_id}
+ws://localhost:8000/api/ws
 ```
 
 ## Test
