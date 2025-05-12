@@ -902,6 +902,11 @@ async def get_sse_stats():
 async def ping():
     return {"status": "pong"}
 
+# SSE için ping endpoint'i
+@app.post("/api/sse/ping/{client_id}", tags=["SSE"])
+async def sse_ping(client_id: str):
+    return {"status": "pong", "client_id": client_id}
+
 # Geliştirme sunucusunu çalıştır
 if __name__ == "__main__":
     try:
