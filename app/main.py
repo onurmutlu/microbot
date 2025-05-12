@@ -180,11 +180,23 @@ app.openapi = custom_openapi
 # CORS ayarları
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5176", "http://localhost:5175", "http://localhost:5174", "http://localhost:3000", "http://localhost:8000", "*"],
+    allow_origins=[
+        "http://localhost:5176", 
+        "http://localhost:5175", 
+        "http://localhost:5174", 
+        "http://localhost:3000", 
+        "http://localhost:8000",
+        "https://microbot-panel.siyahkare.com",
+        "https://microbot-miniapp.vercel.app",
+        "https://microbot-api.siyahkare.com",
+        "https://web.telegram.org",
+        "https://t.me",
+        "*"  # Tüm originler
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
-    expose_headers=["*"],
+    expose_headers=["Content-Disposition", "X-Request-ID", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
     max_age=3600
 )
 
@@ -486,8 +498,39 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket bağlantısını yönetir"""
     client_id = str(uuid.uuid4())
     
-    # WebSocketManager.handle_websocket metodunu kullan
-    await websocket_manager.handle_websocket(websocket, client_id)
+    # Bağlantıyı kabul et
+    try:
+        await websocket.accept()
+        
+        # Bağlantı bilgisini logla
+        origin = websocket.headers.get("origin", "unknown")
+        logger.info(f"WebSocket bağlantısı kabul edildi: {client_id}, origin: {origin}")
+        
+        # WebSocketManager.handle_websocket metodunu kullan
+        await websocket_manager.handle_websocket(websocket, client_id)
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket bağlantısı kesildi: {client_id}")
+    except Exception as e:
+        logger.error(f"WebSocket hatası: {str(e)}")
+
+# WebSocket endpoint - özel ID ile
+@app.websocket("/api/ws/{client_id}")
+async def websocket_endpoint_with_id(websocket: WebSocket, client_id: str):
+    """WebSocket bağlantısını özel ID ile yönetir"""
+    # Bağlantıyı kabul et
+    try:
+        await websocket.accept()
+        
+        # Bağlantı bilgisini logla
+        origin = websocket.headers.get("origin", "unknown")
+        logger.info(f"WebSocket bağlantısı kabul edildi (özel ID): {client_id}, origin: {origin}")
+        
+        # Bağlantıyı kabul et ve yönet
+        await websocket_manager.handle_websocket(websocket, client_id)
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket bağlantısı kesildi (özel ID): {client_id}")
+    except Exception as e:
+        logger.error(f"WebSocket hatası (özel ID): {str(e)}")
 
 # SSE için mesaj broadcast endpoint'i
 @app.post("/api/sse/broadcast", operation_id="main_sse_broadcast")
@@ -520,27 +563,14 @@ async def sse_endpoint(request: Request):
     client_id = str(uuid.uuid4())
     user_id = "anonymous"
     
-    # CORS kontrolü
-    origin = request.headers.get("Origin", "")
-    allowed_origins = [
-        "http://localhost:5176", 
-        "http://localhost:5175", 
-        "http://localhost:5174", 
-        "http://localhost:3000", 
-        "http://localhost:8000"
-    ]
-    if origin and origin not in allowed_origins and '*' not in app.middleware_stack._middlewares[0].options.get('allow_origins', []):
-        logger.warning(f"İzin verilmeyen kaynaktan SSE isteği: {origin}, client_ip: {request.client.host if request.client else 'unknown'}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu kaynaktan istek yapmaya yetkiniz yok"
-        )
+    # CORS kontrolü - Global CORS ayarlarını kullan, ayrıca kontrol etme
+    origin = request.headers.get("Origin", "*")
     
     async def event_generator():
         """SSE için event verisi üreten generator"""
         try:
             # Bağlantı kurulduğunda başlangıç mesajı gönder
-            logger.info(f"SSE bağlantısı kuruldu: {client_id}, ip: {request.client.host if request.client else 'unknown'}")
+            logger.info(f"SSE bağlantısı kuruldu: {client_id}, ip: {request.client.host if request.client else 'unknown'}, origin: {origin}")
             yield f"data: {json.dumps({'type': 'connection', 'client_id': client_id, 'timestamp': datetime.now().isoformat()})}\n\n"
             
             # Message queue oluştur
@@ -600,9 +630,9 @@ async def sse_endpoint(request: Request):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # NGINX için buffering'i devre dışı bırak
-            "Access-Control-Allow-Origin": origin or "*",  # CORS için origin header'ı
+            "Access-Control-Allow-Origin": origin,  # CORS için origin header'ı
             "Access-Control-Allow-Credentials": "true",    # Credentials (örn. cookie) gönderimi
-            "Access-Control-Expose-Headers": "*"          # Tüm özel headerları expose et
+            "Access-Control-Expose-Headers": "Content-Type,Content-Length,Date,X-Request-ID"
         }
     )
 
