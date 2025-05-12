@@ -897,6 +897,11 @@ async def get_sse_stats():
             detail=f"İstatistik alma hatası: {str(e)}"
         )
 
+# Ping endpoint'i
+@app.get("/api/ping", tags=["Health"])
+async def ping():
+    return {"status": "pong"}
+
 # Geliştirme sunucusunu çalıştır
 if __name__ == "__main__":
     try:
