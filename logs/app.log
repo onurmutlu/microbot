@@ -294,3 +294,5 @@
 2025-05-11 15:51:11,136 - app.services.sse_manager - INFO - SSE Manager başlatıldı (cleanup görevi daha sonra başlatılacak)
 2025-05-12 21:56:09,815 - app.services.websocket_manager - INFO - WebSocket Manager başlatıldı (cleanup görevi daha sonra başlatılacak)
 2025-05-12 21:56:11,175 - app.services.sse_manager - INFO - SSE Manager başlatıldı (cleanup görevi daha sonra başlatılacak)
+2025-05-13 23:11:39,871 - app.services.websocket_manager - INFO - WebSocket Manager başlatıldı (cleanup görevi daha sonra başlatılacak)
+2025-05-13 23:11:40,305 - app.services.sse_manager - INFO - SSE Manager başlatıldı (cleanup görevi daha sonra başlatılacak)

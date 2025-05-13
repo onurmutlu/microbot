@@ -4,8 +4,9 @@ import sys
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
-# Log dizinini oluştur
-os.makedirs("logs", exist_ok=True)
+# Log dizini oluştur
+log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "logs"))
+os.makedirs(log_dir, exist_ok=True)
 
 # Loglama seviyesi ayarları
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -28,19 +29,16 @@ console_handler.setFormatter(formatter)
 console_handler.setLevel(LEVEL)
 
 # Dosya handler (rotasyonlu)
-file_handler = RotatingFileHandler("/app/logs/app.log", maxBytes=10_000_000, backupCount=3)
-
+file_handler = RotatingFileHandler(os.path.join(log_dir, "app.log"), maxBytes=10_000_000, backupCount=3)
 file_handler.setFormatter(formatter)
 file_handler.setLevel(LEVEL)
 
 # Hata dosya handler
-error_file_handler = RotatingFileHandler(
-    "logs/error.log", 
-    maxBytes=10*1024*1024,  # 10MB
-    backupCount=5
-)
-error_file_handler.setFormatter(formatter)
-error_file_handler.setLevel(logging.ERROR)
+error_log_dir = os.path.join(log_dir, "errors")
+os.makedirs(error_log_dir, exist_ok=True)
+error_handler = RotatingFileHandler(os.path.join(error_log_dir, "errors.log"), maxBytes=10_000_000, backupCount=5)
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(formatter)
 
 # Kök logger'ı temizle ve yeniden yapılandır
 for handler in logging.root.handlers[:]:
@@ -51,7 +49,7 @@ logger = logging.getLogger("app")
 logger.setLevel(LEVEL)
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
-logger.addHandler(error_file_handler)
+logger.addHandler(error_handler)
 logger.propagate = False
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:

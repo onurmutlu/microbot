@@ -498,8 +498,8 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket bağlantısını yönetir"""
     client_id = str(uuid.uuid4())
     
-    # Bağlantıyı kabul et
     try:
+        # Güvenlik kontrolü olmadan bağlantıyı kabul et
         await websocket.accept()
         
         # Bağlantı bilgisini logla
@@ -517,44 +517,41 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.websocket("/api/ws/{client_id}")
 async def websocket_endpoint_with_id(websocket: WebSocket, client_id: str):
     """WebSocket bağlantısını özel ID ile yönetir"""
-    # Bağlantıyı kabul et
     try:
+        # Güvenlik kontrolü olmadan bağlantıyı kabul et
         await websocket.accept()
         
         # Bağlantı bilgisini logla
         origin = websocket.headers.get("origin", "unknown")
         logger.info(f"WebSocket bağlantısı kabul edildi (özel ID): {client_id}, origin: {origin}")
         
-        # Bağlantıyı kabul et ve yönet
+        # Bağlantıyı yönet
         await websocket_manager.handle_websocket(websocket, client_id)
     except WebSocketDisconnect:
         logger.info(f"WebSocket bağlantısı kesildi (özel ID): {client_id}")
     except Exception as e:
         logger.error(f"WebSocket hatası (özel ID): {str(e)}")
 
-# SSE için mesaj broadcast endpoint'i
-@app.post("/api/sse/broadcast", operation_id="main_sse_broadcast")
-async def broadcast_message(message: dict, request: Request):
-    """Tüm SSE istemcilerine mesaj yayınlar"""
-    try:
-        # Mesajı tüm SSE istemcilerine yayınla
-        await sse_manager.broadcast({
-            "type": "broadcast",
-            "content": message,
-            "sender_ip": request.client.host if request.client else "unknown",
-            "timestamp": datetime.now().isoformat()
-        })
-        return {
-            "success": True,
-            "message": "Mesaj başarıyla yayınlandı",
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"SSE broadcast hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Mesaj yayınlama hatası: {str(e)}"
-        )
+# Ek WebSocket endpoint'leri (diğer URL formatlarını desteklemek için)
+@app.websocket("/ws")
+async def websocket_endpoint_alt1(websocket: WebSocket):
+    """Alternatif WebSocket bağlantı noktası"""
+    await websocket_endpoint(websocket)
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint_with_id_alt1(websocket: WebSocket, client_id: str):
+    """Alternatif WebSocket bağlantı noktası (özel ID ile)"""
+    await websocket_endpoint_with_id(websocket, client_id)
+
+@app.websocket("/api/socket/{client_id}")
+async def websocket_endpoint_with_id_alt2(websocket: WebSocket, client_id: str):
+    """Alternatif WebSocket bağlantı noktası (özel ID ile)"""
+    await websocket_endpoint_with_id(websocket, client_id)
+
+@app.websocket("/socket/{client_id}")
+async def websocket_endpoint_with_id_alt3(websocket: WebSocket, client_id: str):
+    """Alternatif WebSocket bağlantı noktası (özel ID ile)"""
+    await websocket_endpoint_with_id(websocket, client_id)
 
 # Server-Sent Events (SSE) endpoint
 @app.get("/api/sse")
@@ -635,6 +632,128 @@ async def sse_endpoint(request: Request):
             "Access-Control-Expose-Headers": "Content-Type,Content-Length,Date,X-Request-ID"
         }
     )
+
+# SSE endpoint - Belirli bir client_id ile
+@app.get("/api/sse/{client_id}")
+async def sse_endpoint_with_id(client_id: str, request: Request):
+    """Belirli bir client_id ile SSE bağlantısını yönetir"""
+    user_id = "anonymous"
+    
+    # CORS kontrolü - Global CORS ayarlarını kullan
+    origin = request.headers.get("Origin", "*")
+    
+    async def event_generator():
+        """SSE için event verisi üreten generator"""
+        try:
+            # Bağlantı kurulduğunda başlangıç mesajı gönder
+            logger.info(f"SSE bağlantısı kuruldu (özel ID): {client_id}, ip: {request.client.host if request.client else 'unknown'}, origin: {origin}")
+            yield f"data: {json.dumps({'type': 'connection', 'client_id': client_id, 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            # Message queue oluştur
+            message_queue = asyncio.Queue()
+            
+            # SSE Manager'e kaydol
+            await sse_manager.connect(client_id, message_queue)
+            
+            try:
+                # Ping mesajı göndermek için task oluştur
+                async def send_ping():
+                    while True:
+                        try:
+                            await asyncio.sleep(30)  # 30 saniyede bir ping gönder
+                            await message_queue.put({
+                                "type": "ping",
+                                "timestamp": datetime.now().isoformat()
+                            })
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            logger.error(f"SSE ping hatası: {str(e)}")
+                
+                # Ping task'ını başlat
+                ping_task = asyncio.create_task(send_ping())
+                
+                # Mesajları dinlemeye başla
+                while True:
+                    # Queue'dan mesaj al
+                    message = await message_queue.get()
+                    
+                    # Mesajı gönder
+                    yield f"data: {json.dumps(message)}\n\n"
+                    
+                    # Queue işlemi tamamlandı
+                    message_queue.task_done()
+                    
+            except asyncio.CancelledError:
+                logger.info(f"SSE bağlantısı kapatıldı: {client_id}")
+            except Exception as e:
+                logger.error(f"SSE akış hatası: {str(e)}")
+            finally:
+                # Temizlik işlemleri
+                ping_task.cancel()
+                await sse_manager.disconnect(client_id)
+                logger.info(f"SSE bağlantısı sonlandırıldı: {client_id}")
+        
+        except Exception as e:
+            logger.error(f"SSE generator hatası: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'timestamp': datetime.now().isoformat()})}\n\n"
+    
+    # SSE response döndür
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # NGINX için buffering'i devre dışı bırak
+            "Access-Control-Allow-Origin": origin,  # CORS için origin header'ı
+            "Access-Control-Allow-Credentials": "true",    # Credentials (örn. cookie) gönderimi
+            "Access-Control-Expose-Headers": "Content-Type,Content-Length,Date,X-Request-ID"
+        }
+    )
+
+# SSE için mesaj broadcast endpoint'i
+@app.post("/api/sse/broadcast", operation_id="main_sse_broadcast")
+async def broadcast_message(message: dict, request: Request):
+    """Tüm SSE istemcilerine mesaj yayınlar"""
+    try:
+        # Mesajı tüm SSE istemcilerine yayınla
+        await sse_manager.broadcast({
+            "type": "broadcast",
+            "content": message,
+            "sender_ip": request.client.host if request.client else "unknown",
+            "timestamp": datetime.now().isoformat()
+        })
+        return {
+            "success": True,
+            "message": "Mesaj başarıyla yayınlandı",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"SSE broadcast hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Mesaj yayınlama hatası: {str(e)}"
+        )
+
+# Ping endpoint'i
+@app.get("/api/ping", tags=["Health"])
+async def ping():
+    """Basit bir sağlık kontrolü için ping endpoint'i"""
+    return {
+        "status": "pong", 
+        "timestamp": datetime.now().isoformat()
+    }
+
+# SSE için ping endpoint'i
+@app.get("/api/sse/ping/{client_id}", tags=["SSE"])
+async def sse_ping(client_id: str):
+    """Belirli bir client_id için ping kontrolü"""
+    return {
+        "status": "pong", 
+        "client_id": client_id,
+        "timestamp": datetime.now().isoformat()
+    }
 
 # Telegram aktif oturum endpoint'i
 @app.get("/api/telegram/active-session", operation_id="main_get_active_session")
@@ -926,16 +1045,6 @@ async def get_sse_stats():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"İstatistik alma hatası: {str(e)}"
         )
-
-# Ping endpoint'i
-@app.get("/api/ping", tags=["Health"])
-async def ping():
-    return {"status": "pong"}
-
-# SSE için ping endpoint'i
-@app.post("/api/sse/ping/{client_id}", tags=["SSE"])
-async def sse_ping(client_id: str):
-    return {"status": "pong", "client_id": client_id}
 
 # Geliştirme sunucusunu çalıştır
 if __name__ == "__main__":
