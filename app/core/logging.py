@@ -28,11 +28,8 @@ console_handler.setFormatter(formatter)
 console_handler.setLevel(LEVEL)
 
 # Dosya handler (rotasyonlu)
-file_handler = RotatingFileHandler(
-    "logs/app.log", 
-    maxBytes=10*1024*1024,  # 10MB
-    backupCount=5
-)
+file_handler = RotatingFileHandler("/app/logs/app.log", maxBytes=10_000_000, backupCount=3)
+
 file_handler.setFormatter(formatter)
 file_handler.setLevel(LEVEL)
 
