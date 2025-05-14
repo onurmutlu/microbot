@@ -242,7 +242,7 @@ async def telegram_miniapp_auth_middleware(request: Request, call_next):
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
 # Router'ları ekle
-app.include_router(auth.router)
+app.include_router(auth)
 app.include_router(groups.router)
 app.include_router(messages.router)
 app.include_router(logs.router)
