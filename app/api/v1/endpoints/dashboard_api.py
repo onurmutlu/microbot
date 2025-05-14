@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.message import Message
 from app.models.group import Group
-from app.models.template import Template
+from app.models.message_template import MessageTemplate as Template
 from app.models.task import Task, TaskStatus
 from app.models.schedule import Schedule, ScheduleStatus
 from app.dependencies import get_current_user
