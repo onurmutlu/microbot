@@ -182,7 +182,7 @@ app.openapi = custom_openapi
 # CORS ayarlarını yükle
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=["*"],  # Tüm originlere izin ver
     allow_credentials=True,  # Cookie erişimi için gerekli
     allow_methods=["*"],
     allow_headers=["*"],
@@ -562,9 +562,15 @@ async def websocket_endpoint_with_id(websocket: WebSocket, client_id: str):
         origin = websocket.headers.get("origin", "unknown")
         logger.info(f"WebSocket bağlantısı kabul edildi (özel ID): {client_id}, origin: {origin}, auth: {'yes' if auth_key else 'no'}")
         
-        # MiniApp için özel kontrol - auth_key varsa ve Telegram'dan geliyorsa doğrula
+        # MiniApp için özel kontrol
         user_id = None
-        if auth_key and ("t.me" in origin or "telegram" in origin or "tg://" in origin):
+        
+        # MiniApp offline token kontrolü - özel token formatı varsa kabul et
+        if auth_key and auth_key.startswith("miniapp-offline-"):
+            logger.info(f"MiniApp offline token kabul edildi: {auth_key[:20]}...")
+            user_id = f"miniapp-{client_id}"
+        # Token ile doğrulama dene
+        elif auth_key and ("t.me" in origin or "telegram" in origin or "tg://" in origin):
             try:
                 # Burada basit bir doğrulama, gerçek uygulamada JWT token doğrulaması yapılabilir
                 if len(auth_key) > 10:  # Basit kontrol
@@ -810,8 +816,72 @@ async def ping_post():
     """Basit bir sağlık kontrolü için ping endpoint'i (POST metodu)"""
     return {
         "status": "pong", 
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "method": "POST"
     }
+
+# Yeni CORS middleware
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    """Her istek için CORS başlıklarını ekleyen middleware"""
+    response = await call_next(request)
+    # Özellikle MiniApp istekleri için her zaman CORS başlıklarını ekle
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Telegram-Web-App-User"
+    
+    # OPTIONS istekleri için hızlı yanıt
+    if request.method == "OPTIONS":
+        return JSONResponse(
+            content={"message": "OK"},
+            status_code=200,
+            headers=response.headers
+        )
+    
+    return response
+
+# Genel hata yakalama middleware
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    """Tüm hataları yakalayıp uygun yanıt döndüren middleware"""
+    try:
+        return await call_next(request)
+    except Exception as e:
+        logger.error(f"Genel hata yakalandı: {str(e)}")
+        
+        # CORS başlıklarını her zaman ekle
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Telegram-Web-App-User"
+        }
+        
+        # initData içeren istekler için özel yanıt
+        if request.headers.get("content-type") == "application/json":
+            try:
+                body = await request.json()
+                if "initData" in body:
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "success": False,
+                            "error": "server_error",
+                            "message": str(e),
+                            "is_miniapp": True
+                        },
+                        headers=headers
+                    )
+            except:
+                pass
+                
+        # Normal hata yanıtı
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": str(e)
+            },
+            headers=headers
+        )
 
 # SSE için konuya abone olma endpoint'i
 @app.post("/api/sse/subscribe/{client_id}/{topic}", operation_id="main_sse_subscribe")
