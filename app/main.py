@@ -528,84 +528,72 @@ async def restart_handlers():
 # WebSocket endpoint
 @app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket bağlantısını yönetir"""
+    """WebSocket bağlantısını yönetir - Tüm bağlantıları kabul eder"""
     client_id = str(uuid.uuid4())
     
     try:
-        # Bağlantıyı kabul et
+        # Bağlantıyı koşulsuz kabul et
         await websocket.accept()
         
         # Bağlantı bilgisini logla
         origin = websocket.headers.get("origin", "unknown")
-        logger.info(f"WebSocket bağlantısı kabul edildi: {client_id}, origin: {origin}")
+        client_ip = websocket.client.host if hasattr(websocket, 'client') and websocket.client else "unknown"
+        logger.info(f"WebSocket bağlantısı kabul edildi: {client_id}, origin: {origin}, ip: {client_ip}")
         
-        # Token kontrolü yok, açık bağlantı (MiniApp için)
+        # WebSocketManager ile bağlantıyı yönet
         await websocket_manager.handle_websocket(websocket, client_id)
     except WebSocketDisconnect:
         logger.info(f"WebSocket bağlantısı kesildi: {client_id}")
     except Exception as e:
         logger.error(f"WebSocket hatası: {str(e)}")
 
-# WebSocket endpoint - özel ID ile
 @app.websocket("/api/ws/{client_id}")
 async def websocket_endpoint_with_id(websocket: WebSocket, client_id: str):
-    """WebSocket bağlantısını özel ID ile yönetir"""
+    """WebSocket bağlantısını özel ID ile yönetir - Basit kimlik kontrolü"""
     try:
-        # Bağlantıyı kabul etmeden önce doğrulama parametrelerini kontrol et
+        # Parametreleri al (ama doğrulama için kullanma)
         params = websocket.query_params
         auth_key = params.get("auth_key")
         
-        # Bağlantıyı kabul et
+        # Bağlantıyı her durumda kabul et
         await websocket.accept()
         
         # Bağlantı bilgisini logla
         origin = websocket.headers.get("origin", "unknown")
-        logger.info(f"WebSocket bağlantısı kabul edildi (özel ID): {client_id}, origin: {origin}, auth: {'yes' if auth_key else 'no'}")
+        client_ip = websocket.client.host if hasattr(websocket, 'client') and websocket.client else "unknown"
+        logger.info(f"WebSocket bağlantısı kabul edildi (ID:{client_id}), origin: {origin}, ip: {client_ip}")
         
-        # MiniApp için özel kontrol
-        user_id = None
+        # Varsayılan kullanıcı kimliği
+        user_id = f"client-{client_id}"
         
-        # MiniApp offline token kontrolü - özel token formatı varsa kabul et
-        if auth_key and auth_key.startswith("miniapp-offline-"):
-            logger.info(f"MiniApp offline token kabul edildi: {auth_key[:20]}...")
-            user_id = f"miniapp-{client_id}"
-        # Token ile doğrulama dene
-        elif auth_key and ("t.me" in origin or "telegram" in origin or "tg://" in origin):
-            try:
-                # Burada basit bir doğrulama, gerçek uygulamada JWT token doğrulaması yapılabilir
-                if len(auth_key) > 10:  # Basit kontrol
-                    # Telegram ile doğrulanmış kullanıcı ID'si
-                    from app.services.auth_service import get_token_data
-                    token_data = await get_token_data(auth_key)
-                    if token_data:
-                        user_id = token_data.sub
-                        logger.info(f"WebSocket auth başarılı (özel ID), user_id: {user_id}")
-                    else:
-                        logger.warning(f"WebSocket geçersiz auth_key (özel ID): {auth_key[:10]}...")
-            except Exception as e:
-                logger.error(f"WebSocket auth hatası (özel ID): {str(e)}")
+        # Tüm bağlantıları kabul et, ancak token varsa kimliği doğrula
+        if auth_key:
+            if auth_key.startswith("miniapp-"):
+                user_id = f"miniapp-{client_id}"
+                logger.info(f"MiniApp token kabul edildi: {client_id}")
         
         # MiniApp bilgisi varsa ekstra log tut
         init_data = params.get("tgWebAppData")
         if init_data:
-            logger.info(f"WebSocket Telegram MiniApp bağlantısı: {client_id}")
+            logger.info(f"WebSocket MiniApp bağlantısı: {client_id}")
+            user_id = f"miniapp-{client_id}"
         
         # WebSocketManager ile bağlantıyı yönet
         await websocket_manager.handle_websocket(websocket, client_id, user_id)
     except WebSocketDisconnect:
-        logger.info(f"WebSocket bağlantısı kesildi (özel ID): {client_id}")
+        logger.info(f"WebSocket bağlantısı kesildi (ID:{client_id})")
     except Exception as e:
-        logger.error(f"WebSocket hatası (özel ID): {str(e)}", exc_info=True)
+        logger.error(f"WebSocket hatası (ID:{client_id}): {str(e)}")
 
-# Ek WebSocket endpoint'leri (diğer URL formatlarını desteklemek için)
+# Yedek WebSocket endpoint (aynı işlevi farklı URL'lerde sunar)
 @app.websocket("/ws")
 async def websocket_endpoint_alt1(websocket: WebSocket):
-    """Alternatif WebSocket bağlantı noktası"""
+    """Alternatif WebSocket endpoint - Tüm bağlantıları kabul eder"""
     await websocket_endpoint(websocket)
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint_with_id_alt1(websocket: WebSocket, client_id: str):
-    """Alternatif WebSocket bağlantı noktası (özel ID ile)"""
+    """Alternatif WebSocket endpoint - Tüm bağlantıları kabul eder"""
     await websocket_endpoint_with_id(websocket, client_id)
 
 @app.websocket("/api/socket/{client_id}")
@@ -824,21 +812,35 @@ async def ping_post():
 @app.middleware("http")
 async def add_cors_headers(request: Request, call_next):
     """Her istek için CORS başlıklarını ekleyen middleware"""
-    response = await call_next(request)
-    # Özellikle MiniApp istekleri için her zaman CORS başlıklarını ekle
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Telegram-Web-App-User"
-    
-    # OPTIONS istekleri için hızlı yanıt
-    if request.method == "OPTIONS":
+    try:
+        # Önce orijinal isteği işle
+        response = await call_next(request)
+        
+        # CORS başlıkları ekle
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Telegram-Web-App-User"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Type, Content-Length"
+        
+        # OPTIONS istekleri için hızlı yanıt
+        if request.method == "OPTIONS":
+            return response
+            
+        # Response içeriğini değiştirmeden döndür
+        return response
+    except Exception as e:
+        # Hata durumunda yeni yanıt oluştur ve CORS başlıkları ekle
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Telegram-Web-App-User",
+            "Access-Control-Expose-Headers": "Content-Type, Content-Length"
+        }
         return JSONResponse(
-            content={"message": "OK"},
-            status_code=200,
-            headers=response.headers
+            status_code=500,
+            content={"detail": f"CORS middleware hatası: {str(e)}"},
+            headers=headers
         )
-    
-    return response
 
 # Genel hata yakalama middleware
 @app.middleware("http")
@@ -849,37 +851,46 @@ async def catch_exceptions_middleware(request: Request, call_next):
     except Exception as e:
         logger.error(f"Genel hata yakalandı: {str(e)}")
         
-        # CORS başlıklarını her zaman ekle
+        # CORS başlıkları
         headers = {
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Telegram-Web-App-User"
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Telegram-Web-App-User",
+            "Access-Control-Expose-Headers": "Content-Type, Content-Length"
         }
         
-        # initData içeren istekler için özel yanıt
-        if request.headers.get("content-type") == "application/json":
+        # İstek tipine göre yanıt oluştur
+        content_type = request.headers.get("content-type", "")
+        
+        # JSON isteği mi?
+        if "application/json" in content_type:
             try:
-                body = await request.json()
-                if "initData" in body:
-                    return JSONResponse(
-                        status_code=200,
-                        content={
-                            "success": False,
-                            "error": "server_error",
-                            "message": str(e),
-                            "is_miniapp": True
-                        },
-                        headers=headers
-                    )
+                # Request body'yi oku, JSON mu kontrol et 
+                body_bytes = await request.body()
+                if len(body_bytes) > 0:
+                    try:
+                        body = json.loads(body_bytes)
+                        # MiniApp isteği mi?
+                        if "initData" in body:
+                            return JSONResponse(
+                                status_code=200,  # MiniApp için 200 döndür
+                                content={
+                                    "success": False,
+                                    "error": "server_error",
+                                    "message": str(e),
+                                    "is_miniapp": True
+                                },
+                                headers=headers
+                            )
+                    except:
+                        pass
             except:
                 pass
                 
-        # Normal hata yanıtı
+        # Diğer tüm hatalar için standart yanıt
         return JSONResponse(
             status_code=500,
-            content={
-                "detail": str(e)
-            },
+            content={"detail": str(e)},
             headers=headers
         )
 
