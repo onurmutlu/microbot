@@ -193,11 +193,8 @@ async def get_token_data(token: str) -> Optional[TokenPayload]:
     except jwt.ExpiredSignatureError:
         logger.warning("Token süresi dolmuş")
         return None
-    except (jwt.PyJWTError, ValidationError):
-        logger.warning("Geçersiz token")
-        return None
-    except Exception as e:
-        logger.error(f"Token doğrulama hatası: {str(e)}")
+    except Exception as e:  # JWTError ve ValidationError hatalarını kapsar
+        logger.warning(f"Geçersiz token: {str(e)}")
         return None
 
 async def get_current_user(
@@ -213,15 +210,22 @@ async def get_current_user(
             if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header.split(" ")[1]
             else:
-                return None
+                # Cookie'den token almayı dene
+                token = request.cookies.get("access_token")
+                if not token:
+                    logger.debug("Token bulunamadı (header, cookie)")
+                    return None
         
         # Token verilerini doğrula
         token_data = await get_token_data(token)
         if not token_data:
+            logger.debug("Token doğrulama başarısız")
             return None
         
         # Kullanıcıyı veritabanından al - Önce user_id ile dene
-        user = db.query(User).filter(User.id == token_data.sub).first()
+        user = None
+        if token_data.sub:
+            user = db.query(User).filter(User.id == token_data.sub).first()
         
         # Eğer bulunamazsa telegram_id ile kontrol et
         if not user and token_data.telegram_id:

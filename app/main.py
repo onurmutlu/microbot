@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 import time
 import uuid
 import psutil
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 # Temel logging ayarlarını yap
 logging.basicConfig(
@@ -178,8 +179,67 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# CORS ayarları
-setup_secure_cors(app)
+# CORS ayarlarını yükle
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,  # Cookie erişimi için gerekli
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Telegram MiniApp kimliklendirme middleware'i
+@app.middleware("http")
+async def telegram_miniapp_auth_middleware(request: Request, call_next):
+    """
+    Telegram MiniApp'den gelen istekleri özel olarak işler.
+    initData içeren istekleri yakalayıp, hata durumunda uygun yanıt verir.
+    """
+    # İsteği işle
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        # Sadece Telegram MiniApp'den gelen istekleri özel olarak işle
+        content_type = request.headers.get("content-type", "")
+        
+        is_miniapp_request = False
+        body = None
+        
+        if "application/json" in content_type:
+            try:
+                body = await request.json()
+                # initData varsa, bu bir MiniApp isteğidir
+                is_miniapp_request = "initData" in body
+            except:
+                pass
+        
+        # MiniApp isteği ise özel işlem yap
+        if is_miniapp_request and body:
+            logger.warning(f"MiniApp isteği hatası yakalandı: {str(e)}")
+            
+            # Kullanıcı bilgisini alma
+            user_data = body.get("user", {})
+            if not user_data and body.get("initDataUnsafe"):
+                user_data = body.get("initDataUnsafe", {}).get("user", {})
+            
+            # Daha anlamlı bir yanıt döndür
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=200,  # 401 yerine, MiniApp'in işleyebileceği 200 dön
+                content={
+                    "success": False,
+                    "error": "auth_required",
+                    "message": "Kimlik doğrulama gerekli",
+                    "user_info": user_data
+                }
+            )
+        
+        # MiniApp isteği değilse normal hata yanıtı
+        raise e
+
+# Güvenlik önlemleri
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
 # Router'ları ekle
 app.include_router(auth.router)

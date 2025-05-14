@@ -179,30 +179,63 @@ async def get_miniapp_user(
         }
     }
 
-@router.post("/validate", response_model=MiniAppResponse)
-async def validate_miniapp_token(
-    auth_header: Optional[str] = Query(None, alias="Authorization"),
-    current_user: Optional[User] = Depends(get_current_user)
+@router.post("/validate-token", response_model=Dict[str, Any])
+async def validate_token(
+    request: Request,
+    db: Session = Depends(get_db)
 ):
     """
-    MiniApp token'ını doğrular ve kullanıcı bilgilerini döndürür.
-    Bu endpoint, frontend'ten gelen token'ın geçerli olup olmadığını kontrol etmek için kullanılır.
+    Mevcut token'ı doğrular ve kullanıcı bilgilerini döndürür.
+    Bu endpoint özellikle MiniApp'in token doğrulaması için kullanılır.
     """
-    if not current_user:
-        return {
-            "success": False,
-            "message": "Geçersiz token",
-            "data": None
-        }
+    logger = logging.getLogger("miniapp.validate")
     
-    return {
-        "success": True,
-        "message": "Token geçerli",
-        "data": {
+    try:
+        # İstek başlığından token al
+        auth_header = request.headers.get("Authorization", "")
+        token = None
+        
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        else:
+            # Cookie'den token almayı dene
+            token = request.cookies.get("access_token")
+        
+        if not token:
+            logger.warning("Token bulunamadı")
+            return {
+                "authenticated": False,
+                "message": "Token bulunamadı"
+            }
+        
+        # Token'ı doğrula
+        from app.services.auth_service import get_token_data, get_current_user
+        
+        user = await get_current_user(request=request, token=token, db=db)
+        
+        if not user:
+            logger.warning("Geçersiz token veya kullanıcı bulunamadı")
+            return {
+                "authenticated": False,
+                "message": "Geçersiz token veya kullanıcı bulunamadı"
+            }
+        
+        # Token geçerliyse kullanıcı bilgilerini döndür
+        return {
+            "authenticated": True,
             "user": {
-                "id": current_user.id,
-                "telegram_id": current_user.telegram_id,
-                "username": current_user.username
+                "id": user.id,
+                "telegram_id": user.telegram_id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_premium": user.is_premium,
+                "is_active": user.is_active
             }
         }
-    } 
+    except Exception as e:
+        logger.error(f"Token doğrulama hatası: {str(e)}")
+        return {
+            "authenticated": False,
+            "message": f"Doğrulama hatası: {str(e)}"
+        } 

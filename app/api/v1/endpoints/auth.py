@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from datetime import datetime, timedelta
@@ -43,6 +43,9 @@ class TokenResponse(BaseModel):
 class LogoutResponse(BaseModel):
     success: bool
     message: str
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 def verify_telegram_data(auth_data: Dict[str, Any]) -> bool:
     """Telegram'dan gelen verileri doğrular"""
@@ -385,15 +388,28 @@ async def logout(request: Request, current_user: User = Depends(get_current_user
     return {"success": True, "message": "Çıkış işlemi başarılı"}
 
 @router.post("/refresh-token", response_model=TokenResponse)
-async def refresh_access_token(
-    refresh_token: str,
-    db: Session = Depends(get_db)
+async def refresh_token(
+    request: Request,
+    refresh_token_data: RefreshTokenRequest = None,
+    refresh_token_cookie: str = Cookie(None, alias="refresh_token")
 ):
     """
-    Yeni bir access token almak için refresh token kullanır.
-    
-    Bu endpoint, geçerli bir refresh token ile yeni bir access token oluşturur.
+    Refresh token ile yeni bir access token alır.
+    Token, ya istek gövdesinden ya da cookie'den alınabilir.
     """
+    # Token kaynağını belirle - Önce request body, sonra cookie
+    refresh_token = None
+    if refresh_token_data and refresh_token_data.refresh_token:
+        refresh_token = refresh_token_data.refresh_token
+    elif refresh_token_cookie:
+        refresh_token = refresh_token_cookie
+    
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refresh token bulunamadı"
+        )
+    
     try:
         # Refresh token'ı doğrula
         payload = jwt.decode(
@@ -417,49 +433,52 @@ async def refresh_access_token(
                 if blacklisted:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Token geçersiz kılındı"
+                        detail="Token geçersiz kılınmış"
                     )
-            except ImportError:
-                pass  # Cache servisi yoksa atla
-        
-        # Kullanıcı ID'sini al
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Kullanıcı bulunamadı"
-            )
-        
-        # Kullanıcıyı kontrol et
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Kullanıcı bulunamadı veya aktif değil"
-            )
+            except Exception as e:
+                logger.error(f"Cache kontrolü hatası: {str(e)}")
         
         # Yeni tokenlar oluştur
-        user_data = {
-            "id": user.telegram_id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "last_name": user.last_name
+        token_data = {
+            "sub": payload.get("sub"),
+            "telegram_id": payload.get("telegram_id", None),
+            "username": payload.get("username", None),
         }
         
-        # Token oluştur
-        tokens = create_tokens(user_data)
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         
-        return tokens
+        access_token = create_access_token(
+            data={"sub": token_data["sub"], "type": "access", **token_data},
+            expires_delta=access_token_expires
+        )
         
+        new_refresh_token = create_access_token(
+            data={"sub": token_data["sub"], "type": "refresh", **token_data},
+            expires_delta=refresh_token_expires
+        )
+        
+        response = TokenResponse(
+            access_token=access_token,
+            refresh_token=new_refresh_token,
+            token_type="bearer",
+            expires_at=int((datetime.utcnow() + access_token_expires).timestamp())
+        )
+        
+        return response
+    
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token süresi doldu"
+            detail="Refresh token süresi dolmuş",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    except Exception as e:  # PyJWTError yerine genel Exception kullan
+    except (jwt.JWTError, Exception) as e:
+        logger.error(f"Token yenileme hatası: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Geçersiz token: {str(e)}"
+            detail=f"Token doğrulama hatası: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 @router.post("/miniapp/auth", response_model=TokenResponse)
@@ -522,12 +541,9 @@ async def miniapp_auth(data: TelegramInitData, request: Request, db: Session = D
             db.refresh(user)
             logger.info(f"Yeni kullanıcı oluşturuldu: {telegram_id} / {username}")
         
-        # JWT token oluştur
-        token_data = {
-            "sub": str(user.id),
-            "telegram_id": telegram_id,
-            "username": username
-        }
+        # JWT token oluştur - Burada sub alanına kullanıcı ID'sini doğrudan atayalım
+        user_data["id"] = user.id  # Veritabanındaki ID'yi kullan
+        user_data["sub"] = str(user.id)  # Token doğrulaması için sub alanı
         
         # Token oluşturma
         tokens = create_tokens(user_data)

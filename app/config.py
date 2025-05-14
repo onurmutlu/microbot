@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, List, Dict, Union, Any
 from pathlib import Path
 from dotenv import load_dotenv
+from passlib.context import CryptContext
 
 # .env dosyasını yükle
 load_dotenv()
@@ -130,6 +131,14 @@ class Settings(BaseSettings):
     # Prometheus metrikleri
     METRICS_ENABLED: bool = True
     METRICS_PATH: str = "/metrics"
+
+    # Sistem ayarları
+    TESTING: bool = False
+    PWD_CONTEXT: CryptContext = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+    # CORS Ayarları
+    ALLOWED_ORIGINS: List[str] = ["*"]
+    ALLOWED_HOSTS: List[str] = ["*"]
 
     model_config = SettingsConfigDict(
         env_file=".env", 
