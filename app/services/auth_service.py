@@ -220,10 +220,17 @@ async def get_current_user(
         if not token_data:
             return None
         
-        # Kullanıcıyı veritabanından al
+        # Kullanıcıyı veritabanından al - Önce user_id ile dene
         user = db.query(User).filter(User.id == token_data.sub).first()
+        
+        # Eğer bulunamazsa telegram_id ile kontrol et
+        if not user and token_data.telegram_id:
+            user = db.query(User).filter(User.telegram_id == token_data.telegram_id).first()
+            if user:
+                logger.info(f"Kullanıcı telegram_id ile bulundu: {token_data.telegram_id}")
+                
         if not user:
-            logger.warning(f"Token'da bulunan kullanıcı ID {token_data.sub} veritabanında bulunamadı")
+            logger.warning(f"Token'da bulunan kullanıcı bulunamadı. ID: {token_data.sub}, Telegram ID: {token_data.telegram_id}")
             return None
             
         # Kullanıcı aktif mi kontrol et
