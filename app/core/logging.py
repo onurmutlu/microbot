@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 # Log dizini oluştur
-log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "logs"))
+log_dir = os.getenv("LOG_DIR", "/app/logs")
 os.makedirs(log_dir, exist_ok=True)
 
 # Loglama seviyesi ayarları
