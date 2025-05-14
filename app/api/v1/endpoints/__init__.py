@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import auth, admin, licenses, telegram, dashboard_api, ai_insights, miniapp
-from app.api.v1.endpoints.graphql import graphql_router
+from app.api.v1.endpoints.graphql import graphql_router, router as graphql_api_router
 
 router = APIRouter(prefix="/v1")
 
@@ -13,4 +13,5 @@ router.include_router(telegram.router)
 router.include_router(dashboard_api.router)
 router.include_router(ai_insights.router)
 router.include_router(miniapp.router)
-router.include_router(graphql_router)
+# GraphQL router'ı ekle - doğrudan router'ı kullan, graphql_router strawberry grafik arayüzü için
+router.include_router(graphql_api_router)

@@ -379,8 +379,10 @@ async def logout(request: Request, current_user: User = Depends(get_current_user
                         {"revoked_at": current_time}, 
                         expire=ttl
                     )
-                except Exception:  # jwt.PyJWTError yerine genel Exception kullan
+                    logger.info(f"Token kara listeye eklendi: {token[:10]}...")
+                except Exception as e:
                     # Token zaten geçersiz, bir şey yapmaya gerek yok
+                    logger.debug(f"Token geçersiz, kara listeye eklenmedi: {str(e) if 'e' in locals() else 'Bilinmeyen hata'}")
                     pass
         except ImportError:
             pass  # Cache servisi yoksa atla
