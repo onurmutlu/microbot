@@ -1074,7 +1074,7 @@ if __name__ == "__main__":
         uvicorn.run(
             "app.main:app", 
             host="0.0.0.0", 
-            port=8001,  # 8000 portu kullanımda olabilir, 8001 kullan
+            port=8000,  # Sunucu 8000 portundan çalışıyor
             log_level="info",
             log_config=None,  # Varsayılan ayarları kullan
             access_log=True
