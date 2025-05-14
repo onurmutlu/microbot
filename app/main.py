@@ -33,9 +33,7 @@ from app.routers.telegram_auth import router as telegram_auth
 from app.routers.telegram_sessions import router as telegram_sessions
 from app.services.scheduled_messaging import get_scheduled_messaging_service
 from app.config import settings
-from app.api.v1.endpoints import router as api_router
-from app.api.v1.endpoints.ai_insights import router as ai_insights_router
-from app.api.v1.endpoints.graphql.router import router as graphql_router
+from app.api import router as api_v1_router  # API router'larını ekle
 from app.services.telegram_service import TelegramService
 from app.core.websocket import websocket_manager
 from app.models.user import User
@@ -150,6 +148,9 @@ app = FastAPI(
 # Prometheus metrikleri
 Instrumentator().instrument(app).expose(app)
 
+# Rate limiter ekle
+add_rate_limiter(app)
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 # Swagger'da Bearer token kutusu açılmasını sağlayan özel tanım
@@ -178,29 +179,22 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # CORS ayarları
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5176", 
-        "http://localhost:5175", 
-        "http://localhost:5174", 
-        "http://localhost:3000", 
-        "http://localhost:8000",
-        "https://microbot-panel.siyahkare.com",
-        "https://microbot-miniapp.vercel.app",
-        "https://microbot-api.siyahkare.com",
-        "https://web.telegram.org",
-        "https://t.me",
-        "*"  # Tüm originler
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition", "X-Request-ID", "X-Rate-Limit-Limit", "X-Rate-Limit-Remaining", "X-Rate-Limit-Reset"],
-    max_age=3600
-)
+setup_secure_cors(app)
 
-# Statik dosyaları servis et
+# Router'ları ekle
+app.include_router(auth.router)
+app.include_router(groups.router)
+app.include_router(messages.router)
+app.include_router(logs.router)
+app.include_router(auto_reply.router)
+app.include_router(message_template.router)
+app.include_router(scheduler.router)
+app.include_router(dashboard.router)
+app.include_router(telegram_auth)
+app.include_router(telegram_sessions)
+app.include_router(api_v1_router)  # API v1 router'ını ekle
+
+# Statik dosyaları sun
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # İstek işleme süresi middleware'i
@@ -243,27 +237,6 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Sunucu hatası, lütfen daha sonra tekrar deneyin."},
     )
-
-# API router'ını ekle
-app.include_router(api_router, prefix="/api")
-
-# AI ve GraphQL router'larını ekle
-app.include_router(ai_insights_router, prefix="/api/v1")
-app.include_router(graphql_router, prefix="/api/v1")
-
-# Router'ları ekle - özel prefixleri olanlar
-app.include_router(telegram_auth, prefix="/api")
-app.include_router(telegram_sessions, prefix="/api")
-app.include_router(scheduler, prefix="/api")
-app.include_router(message_template, prefix="/api")
-
-# Standart prefixli router'lar 
-app.include_router(auth, prefix="/api")
-app.include_router(groups, prefix="/api")
-app.include_router(messages, prefix="/api")
-app.include_router(logs, prefix="/api")
-app.include_router(auto_reply, prefix="/api")
-app.include_router(dashboard, prefix="/api")
 
 # Veritabanı bağımlılığı
 def get_db():
@@ -499,14 +472,14 @@ async def websocket_endpoint(websocket: WebSocket):
     client_id = str(uuid.uuid4())
     
     try:
-        # Güvenlik kontrolü olmadan bağlantıyı kabul et
+        # Bağlantıyı kabul et
         await websocket.accept()
         
         # Bağlantı bilgisini logla
         origin = websocket.headers.get("origin", "unknown")
         logger.info(f"WebSocket bağlantısı kabul edildi: {client_id}, origin: {origin}")
         
-        # WebSocketManager.handle_websocket metodunu kullan
+        # Token kontrolü yok, açık bağlantı (MiniApp için)
         await websocket_manager.handle_websocket(websocket, client_id)
     except WebSocketDisconnect:
         logger.info(f"WebSocket bağlantısı kesildi: {client_id}")
@@ -518,19 +491,45 @@ async def websocket_endpoint(websocket: WebSocket):
 async def websocket_endpoint_with_id(websocket: WebSocket, client_id: str):
     """WebSocket bağlantısını özel ID ile yönetir"""
     try:
-        # Güvenlik kontrolü olmadan bağlantıyı kabul et
+        # Bağlantıyı kabul etmeden önce doğrulama parametrelerini kontrol et
+        params = websocket.query_params
+        auth_key = params.get("auth_key")
+        
+        # Bağlantıyı kabul et
         await websocket.accept()
         
         # Bağlantı bilgisini logla
         origin = websocket.headers.get("origin", "unknown")
-        logger.info(f"WebSocket bağlantısı kabul edildi (özel ID): {client_id}, origin: {origin}")
+        logger.info(f"WebSocket bağlantısı kabul edildi (özel ID): {client_id}, origin: {origin}, auth: {'yes' if auth_key else 'no'}")
         
-        # Bağlantıyı yönet
-        await websocket_manager.handle_websocket(websocket, client_id)
+        # MiniApp için özel kontrol - auth_key varsa ve Telegram'dan geliyorsa doğrula
+        user_id = None
+        if auth_key and ("t.me" in origin or "telegram" in origin or "tg://" in origin):
+            try:
+                # Burada basit bir doğrulama, gerçek uygulamada JWT token doğrulaması yapılabilir
+                if len(auth_key) > 10:  # Basit kontrol
+                    # Telegram ile doğrulanmış kullanıcı ID'si
+                    from app.services.auth_service import get_token_data
+                    token_data = await get_token_data(auth_key)
+                    if token_data:
+                        user_id = token_data.sub
+                        logger.info(f"WebSocket auth başarılı (özel ID), user_id: {user_id}")
+                    else:
+                        logger.warning(f"WebSocket geçersiz auth_key (özel ID): {auth_key[:10]}...")
+            except Exception as e:
+                logger.error(f"WebSocket auth hatası (özel ID): {str(e)}")
+        
+        # MiniApp bilgisi varsa ekstra log tut
+        init_data = params.get("tgWebAppData")
+        if init_data:
+            logger.info(f"WebSocket Telegram MiniApp bağlantısı: {client_id}")
+        
+        # WebSocketManager ile bağlantıyı yönet
+        await websocket_manager.handle_websocket(websocket, client_id, user_id)
     except WebSocketDisconnect:
         logger.info(f"WebSocket bağlantısı kesildi (özel ID): {client_id}")
     except Exception as e:
-        logger.error(f"WebSocket hatası (özel ID): {str(e)}")
+        logger.error(f"WebSocket hatası (özel ID): {str(e)}", exc_info=True)
 
 # Ek WebSocket endpoint'leri (diğer URL formatlarını desteklemek için)
 @app.websocket("/ws")
@@ -1064,6 +1063,265 @@ async def get_active_session():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Aktif oturum bilgisi alınamadı"
         )
+
+# WebSocket Test sayfası
+@app.get("/websocket-test", include_in_schema=False)
+async def websocket_test():
+    """WebSocket test sayfasını döndürür"""
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>MicroBot WebSocket Test</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #f8f9fa;
+                color: #333;
+            }
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            h1 {
+                color: #4a6cf7;
+            }
+            .connection-controls {
+                margin: 20px 0;
+                padding: 15px;
+                background-color: #f1f5ff;
+                border-radius: 8px;
+                border-left: 4px solid #4a6cf7;
+            }
+            .token-input {
+                width: 100%;
+                padding: 8px;
+                margin: 10px 0;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            .messages {
+                margin-top: 20px;
+                height: 300px;
+                overflow-y: auto;
+                border: 1px solid #eee;
+                padding: 10px;
+                border-radius: 4px;
+                background-color: #f5f5f5;
+                font-family: monospace;
+            }
+            .message {
+                margin: 5px 0;
+                padding: 5px;
+                border-bottom: 1px solid #eee;
+            }
+            .sent {
+                background-color: #e3f9e5;
+            }
+            .received {
+                background-color: #e7f5ff;
+            }
+            .error {
+                background-color: #ffebee;
+                color: #d32f2f;
+            }
+            .status {
+                margin-top: 10px;
+                font-weight: bold;
+            }
+            .status.connected {
+                color: #4caf50;
+            }
+            .status.disconnected {
+                color: #f44336;
+            }
+            .button {
+                background-color: #4a6cf7;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                margin-right: 8px;
+            }
+            .button:hover {
+                background-color: #3a5ce5;
+            }
+            .message-input {
+                width: 70%;
+                padding: 8px;
+                margin-right: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>MicroBot WebSocket Test</h1>
+            
+            <div class="connection-controls">
+                <h3>Bağlantı Ayarları</h3>
+                <input type="text" id="wsUrl" class="token-input" value="ws://localhost:8000/api/ws" placeholder="WebSocket URL">
+                <input type="text" id="authToken" class="token-input" placeholder="JWT Token (opsiyonel)">
+                <div>
+                    <button id="connectBtn" class="button">Bağlan</button>
+                    <button id="disconnectBtn" class="button" disabled>Bağlantıyı Kes</button>
+                </div>
+                <div class="status disconnected" id="status">Bağlantı kesik</div>
+            </div>
+            
+            <div>
+                <h3>Mesaj Gönder</h3>
+                <input type="text" id="messageInput" class="message-input" placeholder="Mesaj">
+                <button id="sendBtn" class="button" disabled>Gönder</button>
+            </div>
+            
+            <div>
+                <h3>Mesajlar</h3>
+                <div class="messages" id="messages"></div>
+            </div>
+        </div>
+        
+        <script>
+            let socket = null;
+            
+            document.getElementById('connectBtn').addEventListener('click', connect);
+            document.getElementById('disconnectBtn').addEventListener('click', disconnect);
+            document.getElementById('sendBtn').addEventListener('click', sendMessage);
+            document.getElementById('messageInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+            
+            function connect() {
+                const wsUrl = document.getElementById('wsUrl').value;
+                const authToken = document.getElementById('authToken').value;
+                
+                let url = wsUrl;
+                // Eğer token varsa query parameter olarak ekle
+                if (authToken) {
+                    url += (url.includes('?') ? '&' : '?') + 'auth_key=' + encodeURIComponent(authToken);
+                }
+                
+                try {
+                    socket = new WebSocket(url);
+                    
+                    socket.onopen = function(e) {
+                        updateStatus('Bağlantı kuruldu', true);
+                        addMessage('Sistem', 'WebSocket bağlantısı açıldı', 'received');
+                        document.getElementById('connectBtn').disabled = true;
+                        document.getElementById('disconnectBtn').disabled = false;
+                        document.getElementById('sendBtn').disabled = false;
+                    };
+                    
+                    socket.onmessage = function(event) {
+                        const data = JSON.parse(event.data);
+                        addMessage('Sunucu', event.data, 'received');
+                        
+                        // Ping gönderildiyse pong yanıtı ver
+                        if (data.type === 'ping') {
+                            socket.send(JSON.stringify({
+                                type: 'pong',
+                                timestamp: new Date().toISOString()
+                            }));
+                        }
+                    };
+                    
+                    socket.onclose = function(event) {
+                        if (event.wasClean) {
+                            addMessage('Sistem', `Bağlantı düzgün kapatıldı, kod=${event.code} neden=${event.reason}`, 'received');
+                        } else {
+                            addMessage('Sistem', 'Bağlantı koptu', 'error');
+                        }
+                        updateStatus('Bağlantı kesik', false);
+                        document.getElementById('connectBtn').disabled = false;
+                        document.getElementById('disconnectBtn').disabled = true;
+                        document.getElementById('sendBtn').disabled = true;
+                    };
+                    
+                    socket.onerror = function(error) {
+                        addMessage('Hata', 'WebSocket hatası: ' + JSON.stringify(error), 'error');
+                        updateStatus('Bağlantı hatası', false);
+                    };
+                    
+                } catch (e) {
+                    addMessage('Hata', 'Bağlantı hatası: ' + e.message, 'error');
+                    updateStatus('Bağlantı hatası', false);
+                }
+            }
+            
+            function disconnect() {
+                if (socket) {
+                    socket.close();
+                    socket = null;
+                }
+            }
+            
+            function sendMessage() {
+                const messageInput = document.getElementById('messageInput');
+                const message = messageInput.value;
+                
+                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                    addMessage('Hata', 'Bağlantı açık değil', 'error');
+                    return;
+                }
+                
+                if (!message) {
+                    return;
+                }
+                
+                try {
+                    // JSON olarak göndermeyi dene
+                    let jsonMessage;
+                    try {
+                        jsonMessage = JSON.parse(message);
+                        socket.send(message);
+                    } catch (e) {
+                        // JSON değilse, metin mesajı olarak gönder
+                        socket.send(JSON.stringify({
+                            type: 'message',
+                            content: message,
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                    
+                    addMessage('Siz', message, 'sent');
+                    messageInput.value = '';
+                } catch (e) {
+                    addMessage('Hata', 'Mesaj gönderme hatası: ' + e.message, 'error');
+                }
+            }
+            
+            function addMessage(sender, message, type) {
+                const messagesDiv = document.getElementById('messages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                messageDiv.innerHTML = `<strong>${sender}:</strong> ${message}`;
+                messagesDiv.appendChild(messageDiv);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+            
+            function updateStatus(message, isConnected) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.textContent = message;
+                statusDiv.className = `status ${isConnected ? 'connected' : 'disconnected'}`;
+            }
+        </script>
+    </body>
+    </html>
+    """
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html_content)
 
 # Geliştirme sunucusunu çalıştır
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from app.models.message_template import MessageTemplate
 from app.models.task import Task, TaskStatus
 from app.models.schedule import Schedule, ScheduleStatus
 from fastapi.security import OAuth2PasswordBearer
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user as auth_get_current_user
 from app.services.scheduled_messaging import get_scheduled_messaging_service
 from app.services.group_analyzer import GroupAnalyzer
 
@@ -24,16 +24,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 # Mevcut kullanıcıyı getir
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    from app.services.auth_service import AuthService
-    auth_service = AuthService(db)
-    user = auth_service.get_current_user(token)
-    if not user:
+    try:
+        user = auth_get_current_user(db=db, token=token)
+        return user
+    except HTTPException:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Geçersiz kimlik bilgileri",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return user
 
 @router.get("/stats", operation_id="dashboard_get_stats")
 async def get_dashboard_stats(

@@ -5,7 +5,7 @@ import logging
 
 from app.config import settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("app.middleware.cors")
 
 def add_cors_middleware(
     app: FastAPI,
@@ -60,56 +60,62 @@ def add_cors_middleware(
     
     return app
 
-def setup_secure_cors(app: FastAPI, frontend_url: str):
+def setup_secure_cors(app: FastAPI):
     """
-    Production ortamı için güvenli CORS yapılandırması yapar.
+    FastAPI uygulaması için güvenli CORS ayarlarını yapılandırır.
     
-    Args:
-        app: FastAPI uygulaması
-        frontend_url: Frontend URL'i
+    CORS (Cross-Origin Resource Sharing) ayarları, API'nin hangi kaynaklardan
+    gelen isteklere yanıt vereceğini belirler.
     """
-    # Güvenli CORS ayarları
-    allow_origins = [frontend_url]
-    
-    # Telegram web app URL'i ekleniyor
-    if "t.me" not in allow_origins:
-        allow_origins.append("https://web.telegram.org")
-    
-    # Geliştirme ortamı için localhost ekleniyor
-    if settings.DEBUG:
-        allow_origins.extend([
-            "http://localhost",
-            "http://localhost:3000",
-            "http://localhost:5000",
-            "http://127.0.0.1",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:5000"
-        ])
-    
-    # Güvenli header listesi
-    secure_headers = [
-        "Accept",
-        "Accept-Language",
-        "Authorization",
-        "Content-Type",
-        "Origin",
-        "Referer",
-        "User-Agent",
-        "X-Requested-With",
-        "X-CSRF-Token",
-        "X-Telegram-Init-Data",
-        "X-Api-Key"
-    ]
-    
-    # Güvenli metodlar
-    secure_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
-    
-    # CORS middleware'ini ekle
-    return add_cors_middleware(
-        app=app,
-        allow_origins=allow_origins,
-        allow_credentials=True,
-        allow_methods=secure_methods,
-        allow_headers=secure_headers,
-        max_age=3600  # 1 saat
-    ) 
+    try:
+        # Ayarlardan izin verilen kaynakları al
+        origins = settings.CORS_ORIGINS
+
+        # CORS middleware'i ekle
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+            allow_methods=settings.CORS_ALLOW_METHODS,
+            allow_headers=["*"],
+            expose_headers=[
+                "Content-Disposition", 
+                "X-Request-ID", 
+                "X-Rate-Limit-Limit", 
+                "X-Rate-Limit-Remaining", 
+                "X-Rate-Limit-Reset"
+            ],
+            max_age=3600  # 1 saat
+        )
+        
+        logger.info(f"CORS ayarları yapılandırıldı. İzin verilen kaynaklar: {origins}")
+        
+        # Uyarı: Eğer * (tüm kaynaklar) izin veriliyorsa, güvenlik uyarısı göster
+        if "*" in origins:
+            logger.warning(
+                "GÜVENLİK UYARISI: CORS ayarlarında tüm kaynaklara (*) izin verildi. "
+                "Üretim ortamında yalnızca güvenilen kaynakları açıkça belirtin."
+            )
+    except Exception as e:
+        logger.error(f"CORS ayarları yapılandırılırken hata oluştu: {str(e)}")
+        # Hata durumunda varsayılan güvenli ayarları kullan
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:8000"],  # Sadece yerel geliştirme
+            allow_credentials=True,
+            allow_methods=["GET", "POST"],
+            allow_headers=["*"],
+            max_age=3600
+        )
+        logger.info("Güvenli varsayılan CORS ayarları uygulandı")
+
+def get_cors_info():
+    """
+    Mevcut CORS yapılandırması hakkında bilgi döndürür.
+    """
+    return {
+        "origins": settings.CORS_ORIGINS,
+        "allow_credentials": settings.CORS_ALLOW_CREDENTIALS,
+        "allow_methods": settings.CORS_ALLOW_METHODS,
+        "max_age": 3600
+    } 

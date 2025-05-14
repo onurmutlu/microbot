@@ -25,6 +25,15 @@ class TelegramAuthData(BaseModel):
     query_id: Optional[str] = None
     initData: Optional[str] = None  # Telegram Mini App'in raw initData'sı
 
+class TelegramInitData(BaseModel):
+    initData: str
+    initDataUnsafe: Optional[Dict[str, Any]] = None
+    user: Optional[Dict[str, Any]] = None
+    sessionInfo: Optional[Dict[str, Any]] = None
+
+    class Config:
+        extra = "allow"  # Fazladan gelen alanları kabul et
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
@@ -353,6 +362,23 @@ async def logout(request: Request, current_user: User = Depends(get_current_user
                 except jwt.PyJWTError:
                     # Token zaten geçersiz, bir şey yapmaya gerek yok
                     pass
+
+                # Token'ı kara listeye al - tokenin süresi kadar
+                try:
+                    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+                    exp_time = payload.get("exp", 0)
+                    current_time = int(datetime.utcnow().timestamp())
+                    ttl = max(0, exp_time - current_time)
+                    
+                    # Redis'e kaydet
+                    await cache_service.set(
+                        f"blacklist:token:{token}", 
+                        {"revoked_at": current_time}, 
+                        expire=ttl
+                    )
+                except Exception:  # jwt.PyJWTError yerine genel Exception kullan
+                    # Token zaten geçersiz, bir şey yapmaya gerek yok
+                    pass
         except ImportError:
             pass  # Cache servisi yoksa atla
     
@@ -430,8 +456,93 @@ async def refresh_access_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token süresi doldu"
         )
-    except jwt.PyJWTError:
+    except Exception as e:  # PyJWTError yerine genel Exception kullan
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Geçersiz token"
+            detail=f"Geçersiz token: {str(e)}"
+        )
+
+@router.post("/miniapp/auth", response_model=TokenResponse)
+async def miniapp_auth(data: TelegramInitData, request: Request, db: Session = Depends(get_db)):
+    """
+    Telegram Mini App'ten gelen kimlik doğrulama verilerini doğrular ve token üretir.
+    
+    Bu endpoint özellikle Mini App arayüzünden doğrudan gönderilen initData yapısını işler.
+    """
+    logger = logging.getLogger("auth.miniapp")
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info(f"Telegram MiniApp auth isteği alındı, IP: {client_ip}")
+    
+    # initData'yı işle
+    init_data = data.initData
+    
+    # Auth verilerini oluştur
+    auth_dict = {"initData": init_data}
+    
+    try:
+        # initData'yı parse et ve doğrula
+        if not verify_telegram_data(auth_dict):
+            logger.error(f"MiniApp doğrulama başarısız, IP: {client_ip}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="MiniApp doğrulama başarısız"
+            )
+        
+        # Güvenli varsayılan değerleri al
+        user_data = data.user or {}
+        if not user_data and data.initDataUnsafe:
+            user_data = data.initDataUnsafe.get("user", {})
+        
+        telegram_id = str(user_data.get("id", ""))
+        username = user_data.get("username", "")
+        first_name = user_data.get("first_name", "")
+        
+        if not telegram_id:
+            logger.error(f"MiniApp auth: Telegram ID bulunamadı, IP: {client_ip}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Telegram kullanıcı bilgisi eksik"
+            )
+        
+        # Kullanıcıyı veritabanından bul veya oluştur
+        user = db.query(User).filter(User.telegram_id == telegram_id).first()
+        
+        if not user:
+            user = User(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name,
+                last_name=user_data.get("last_name", ""),
+                is_active=True,
+                is_premium=user_data.get("is_premium", False),
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            logger.info(f"Yeni kullanıcı oluşturuldu: {telegram_id} / {username}")
+        
+        # JWT token oluştur
+        token_data = {
+            "sub": str(user.id),
+            "telegram_id": telegram_id,
+            "username": username
+        }
+        
+        # Token oluşturma
+        tokens = create_tokens(user_data)
+        
+        # Son login zamanını güncelle
+        user.last_login = datetime.utcnow()
+        db.commit()
+        
+        return tokens
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"MiniApp auth hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Kimlik doğrulama hatası: {str(e)}"
         ) 

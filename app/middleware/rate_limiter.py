@@ -8,9 +8,19 @@ from datetime import datetime, timedelta
 from typing import Dict, Set, List, Tuple, Optional, Callable, Any
 import hashlib
 import re
+import logging
 
 from app.core.logging import logger
 from app.config import settings
+
+logger = logging.getLogger("app.middleware.rate_limiter")
+
+# API istek sınırlama için basit bir sözlük tabanlı önbellek
+# IP -> (zamanlar listesi, son temizleme zamanı)
+request_cache: Dict[str, Tuple[list, float]] = {}
+
+# Temizleme intervali (saniye)
+CLEANUP_INTERVAL = 60.0
 
 class RateLimiterBackend:
     """Rate limiter için kayıt tutma backend'i"""
@@ -248,4 +258,137 @@ def add_rate_limiter(app: FastAPI, settings_obj=None):
     app.add_middleware(RateLimiter)
     
     logger.info("Rate limiter middleware eklendi")
-    return limiter 
+    return limiter
+
+def check_rate_limit(client_ip: str) -> Tuple[bool, int, float]:
+    """
+    Bir IP adresi için rate limit kontrolü yapar.
+    
+    Args:
+        client_ip: İstemci IP adresi
+        
+    Returns:
+        Tuple[bool, int, float]: (Limit aşıldı mı, kalan istek sayısı, sıfırlama zamanı)
+    """
+    current_time = time.time()
+    
+    # Son 60 saniye içindeki istekleri sakla
+    window_start_time = current_time - 60
+    
+    # Cache'de kayıt yoksa oluştur
+    if client_ip not in request_cache:
+        request_cache[client_ip] = ([], current_time)
+    
+    # İstek zamanlarını al
+    request_times, _ = request_cache[client_ip]
+    
+    # Son bir dakika içindeki istekleri filtrele
+    recent_requests = [t for t in request_times if t > window_start_time]
+    
+    # Limit kontrolü
+    limit = settings.RATE_LIMIT_PER_MINUTE
+    is_exceeded = len(recent_requests) >= limit
+    
+    # Bu isteği ekle (zaten limit aşılsa bile ekliyoruz ki ileride Retry-After doğru hesaplansın)
+    recent_requests.append(current_time)
+    request_cache[client_ip] = (recent_requests, current_time)
+    
+    # En eski isteğin zamanını bul ve sıfırlama zamanını hesapla
+    if recent_requests:
+        # İlk istek + 60 saniye, yani pencere dışına çıkacağı zaman
+        oldest_request = min(recent_requests)
+        reset_time = oldest_request + 60
+    else:
+        reset_time = current_time + 60
+    
+    # Kalan istek sayısı
+    remaining = max(0, limit - len(recent_requests))
+    
+    return is_exceeded, remaining, reset_time
+
+def _get_client_ip(request: Request) -> str:
+    """
+    İstemci IP adresini alır.
+    Proxy arkasındaysa X-Forwarded-For header'ından almaya çalışır.
+    """
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        # X-Forwarded-For header'ı virgülle ayrılmış IP adresleri içerebilir
+        # İlk IP adresi genellikle gerçek istemci IP'sidir
+        return xff.split(",")[0].strip()
+    
+    # Normal durumda client host adresini kullan
+    return request.client.host if request.client else "unknown"
+
+def _should_skip_rate_limiting(path: str) -> bool:
+    """
+    Belirli path'ler için rate limiting atlanmalı mı?
+    """
+    # Sağlık kontrolü endpointleri için rate limiti atla
+    skip_paths = {
+        "/health", 
+        "/api/health", 
+        "/metrics",
+        "/api/ping",
+        "/ping",
+        "/favicon.ico"
+    }
+    
+    # Static dosya yolları için atla
+    if path.startswith("/static/"):
+        return True
+        
+    return path in skip_paths
+
+async def periodic_cleanup():
+    """
+    Rate limiter önbelleğini periyodik olarak temizleyen bir arka plan görevi
+    """
+    while True:
+        try:
+            await asyncio.sleep(CLEANUP_INTERVAL)
+            cleanup_old_requests()
+        except Exception as e:
+            logger.error(f"Rate limiter temizleme hatası: {str(e)}")
+
+def cleanup_old_requests():
+    """
+    Eski istekleri önbellekten temizler
+    """
+    current_time = time.time()
+    window_start_time = current_time - 60
+    remove_keys = []
+    
+    for ip, (request_times, last_cleanup_time) in request_cache.items():
+        # Son temizlemeden bu yana 5 dakika geçtiyse ve son istek 1 dakikadan eskiyse
+        # bu IP'yi tamamen kaldır
+        if current_time - last_cleanup_time > 300 and (not request_times or max(request_times) < window_start_time):
+            remove_keys.append(ip)
+            continue
+            
+        # Son bir dakika içindeki istekleri tut, eskileri sil
+        recent_requests = [t for t in request_times if t > window_start_time]
+        
+        # İstek zamanlarını güncelle
+        if len(recent_requests) < len(request_times):
+            request_cache[ip] = (recent_requests, current_time)
+    
+    # Gereksiz kayıtları temizle
+    for ip in remove_keys:
+        del request_cache[ip]
+        
+    if remove_keys:
+        logger.debug(f"{len(remove_keys)} IP adresi rate limiter önbelleğinden temizlendi")
+
+def get_rate_limiter_stats():
+    """
+    Rate limiter istatistiklerini döndürür
+    """
+    total_tracked_ips = len(request_cache)
+    total_requests = sum(len(times) for times, _ in request_cache.values())
+    
+    return {
+        "tracked_ips": total_tracked_ips,
+        "total_requests": total_requests,
+        "limit_per_minute": settings.RATE_LIMIT_PER_MINUTE
+    } 
