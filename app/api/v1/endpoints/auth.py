@@ -9,6 +9,7 @@ import urllib.parse
 from typing import Dict, Any, Optional
 import jwt
 from sqlalchemy.orm import Session
+import logging
 
 from app.database import get_db
 from app.models.user import User
@@ -18,10 +19,11 @@ from app.services.auth_service import get_current_user
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 class TelegramAuthData(BaseModel):
-    auth_date: int
-    hash: str
-    user: Dict[str, Any]
+    auth_date: Optional[int] = None
+    hash: Optional[str] = None
+    user: Optional[Dict[str, Any]] = None
     query_id: Optional[str] = None
+    initData: Optional[str] = None  # Telegram Mini App'in raw initData'sı
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -35,32 +37,104 @@ class LogoutResponse(BaseModel):
 
 def verify_telegram_data(auth_data: Dict[str, Any]) -> bool:
     """Telegram'dan gelen verileri doğrular"""
-    data_check_string = '\n'.join([
-        f"{k}={v}" for k, v in sorted(auth_data.items()) 
-        if k != 'hash' and k != 'user'
-    ])
-    
-    if isinstance(auth_data.get('user', {}), dict):
-        data_check_string += f"\nuser={json.dumps(auth_data['user'])}"
-    
-    secret_key = hashlib.sha256(settings.BOT_TOKEN.encode()).digest()
-    computed_hash = hmac.new(
-        secret_key, 
-        data_check_string.encode(), 
-        hashlib.sha256
-    ).hexdigest()
-    
-    # Hash doğrulama
-    if computed_hash != auth_data['hash']:
-        return False
+    try:
+        logger = logging.getLogger("auth.telegram")
         
-    # Tarih kontrolü (en fazla 1 gün önce)
-    auth_date = int(auth_data['auth_date'])
-    now = int(datetime.utcnow().timestamp())
-    if now - auth_date > 86400:
-        return False
+        # Auth verisini kontrol et
+        if not auth_data or not auth_data.get('hash'):
+            logger.error("Hash bilgisi eksik veya auth_data boş")
+            return False
         
-    return True
+        # Telegram init_data string formatında gelirse parse et
+        if isinstance(auth_data, dict) and auth_data.get('initData') and isinstance(auth_data.get('initData'), str):
+            raw_init_data = auth_data.get('initData')
+            
+            logger.info(f"Raw initData alındı: {raw_init_data[:100]}...")
+            
+            # init_data'yı parçalara ayır
+            params = dict(urllib.parse.parse_qsl(raw_init_data))
+            
+            # Temel parametreleri al
+            hash_value = params.get('hash')
+            if not hash_value:
+                logger.error("Hash değeri initData içinde bulunamadı")
+                return False
+                
+            # User bilgisini al ve parse et
+            user_data = params.get('user')
+            try:
+                if user_data:
+                    user_data = json.loads(user_data)
+            except Exception as e:
+                logger.error(f"User verisi parse edilemedi: {str(e)}")
+                return False
+                
+            # Yeni auth_data oluştur
+            auth_data = {k: v for k, v in params.items() if k != 'user'}
+            if user_data:
+                auth_data['user'] = user_data
+        
+        # Hash değerini al
+        received_hash = auth_data.get('hash')
+        if not received_hash:
+            logger.error("Hash değeri bulunamadı")
+            return False
+            
+        # Gelen veri yapısına göre doğrulama string'i oluştur
+        if 'user' in auth_data and isinstance(auth_data['user'], dict):
+            # Telegram WebApp formatı: user ayrı bir anahtar
+            data_check_string = '\n'.join([
+                f"{k}={v}" for k, v in sorted(auth_data.items()) 
+                if k != 'hash' and k != 'user'
+            ])
+            
+            if auth_data.get('user'):
+                data_check_string += f"\nuser={json.dumps(auth_data['user'])}"
+        else:
+            # Basit format: tüm anahtarlar aynı seviyede
+            data_check_string = '\n'.join([
+                f"{k}={v}" for k, v in sorted(auth_data.items()) 
+                if k != 'hash'
+            ])
+        
+        # Bot token'dan hash oluştur
+        secret_key = hashlib.sha256(settings.BOT_TOKEN.encode()).digest()
+        computed_hash = hmac.new(
+            secret_key, 
+            data_check_string.encode(), 
+            hashlib.sha256
+        ).hexdigest()
+        
+        # Hash doğrulama
+        is_hash_valid = computed_hash == received_hash
+        
+        if not is_hash_valid:
+            logger.error(f"Hash doğrulama başarısız. Alınan: {received_hash}, Hesaplanan: {computed_hash}")
+            return False
+            
+        # Tarih kontrolü (en fazla 1 gün önce)
+        auth_date = auth_data.get('auth_date')
+        if not auth_date:
+            logger.error("auth_date değeri bulunamadı")
+            return False
+            
+        if isinstance(auth_date, str) and auth_date.isdigit():
+            auth_date = int(auth_date)
+        elif not isinstance(auth_date, int):
+            logger.error(f"auth_date geçersiz format: {auth_date}")
+            return False
+            
+        now = int(datetime.utcnow().timestamp())
+        if now - auth_date > 86400:  # 24 saat (saniye)
+            logger.error(f"auth_date çok eski: {auth_date}, şu an: {now}")
+            return False
+            
+        logger.info("Telegram doğrulama başarılı ✓")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Telegram doğrulama hatası: {str(e)}")
+        return False
 
 def create_tokens(user_data: Dict[str, Any]) -> Dict[str, Any]:
     """JWT token oluşturur"""
@@ -105,38 +179,70 @@ async def telegram_auth(auth_data: TelegramAuthData, request: Request, db: Sessi
     
     Bu endpoint, Telegram Mini App'ten gönderilen initData'yı doğrular
     ve başarılı doğrulama durumunda kullanıcı için token oluşturur.
+    
+    Mini Uygulamadan gelen veriler iki şekilde kabul edilir:
+    1. Ayrıştırılmış JSON formatında (auth_date, hash, user, vs.)
+    2. Ham initData string olarak (Web App'ten doğrudan alınan query string)
     """
-    # Log IP adresi ve istek bilgileri
+    # Log amaçlı bilgiler
+    logger = logging.getLogger("auth.telegram")
     client_ip = request.client.host if request.client else "unknown"
+    logger.info(f"Telegram auth isteği alındı, IP: {client_ip}")
     
     # Auth verilerini dict'e dönüştür
-    auth_dict = auth_data.dict()
+    auth_dict = auth_data.dict(exclude_none=True)
     
     # Doğrulama
     if not verify_telegram_data(auth_dict):
+        logger.error(f"Telegram doğrulama başarısız, IP: {client_ip}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Telegram doğrulama başarısız"
         )
     
-    # Kullanıcı bilgilerini al
-    user_data = auth_dict.get("user", {})
+    # User bilgisini al
+    user_data = None
+    
+    # initData string formatında mı geldi?
+    if auth_dict.get('initData'):
+        params = dict(urllib.parse.parse_qsl(auth_dict['initData']))
+        user_json = params.get('user')
+        if user_json:
+            try:
+                user_data = json.loads(user_json)
+            except Exception as e:
+                logger.error(f"User verisi parse edilemedi: {str(e)}")
+    else:
+        # Normal JSON formatında gelmiş
+        user_data = auth_dict.get('user', {})
+    
+    if not user_data or not user_data.get('id'):
+        logger.error("Kullanıcı bilgisi eksik veya geçersiz")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Kullanıcı bilgisi eksik veya geçersiz"
+        )
+    
+    telegram_id = user_data.get('id')
+    logger.info(f"Telegram kullanıcısı doğrulandı: {telegram_id}")
     
     # Kullanıcı bilgilerini veritabanında kontrol et/güncelle
-    user = db.query(User).filter(User.telegram_id == user_data.get("id")).first()
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
     
     if not user:
         # Yeni kullanıcı oluştur
         user = User(
-            telegram_id=user_data.get("id"),
+            telegram_id=telegram_id,
             username=user_data.get("username", ""),
             first_name=user_data.get("first_name", ""),
             last_name=user_data.get("last_name", ""),
             photo_url=user_data.get("photo_url", ""),
             auth_date=auth_dict.get("auth_date"),
+            is_active=True,
             last_login=datetime.utcnow()
         )
         db.add(user)
+        logger.info(f"Yeni kullanıcı oluşturuldu: {telegram_id}")
     else:
         # Mevcut kullanıcıyı güncelle
         user.last_login = datetime.utcnow()
@@ -145,6 +251,11 @@ async def telegram_auth(auth_data: TelegramAuthData, request: Request, db: Sessi
             user.username = user_data.get("username")
         if user_data.get("photo_url"):
             user.photo_url = user_data.get("photo_url")
+        if user_data.get("first_name"):
+            user.first_name = user_data.get("first_name")
+        if user_data.get("last_name"):
+            user.last_name = user_data.get("last_name")
+        logger.info(f"Mevcut kullanıcı güncellendi: {telegram_id}")
     
     db.commit()
     
@@ -158,6 +269,7 @@ async def telegram_auth(auth_data: TelegramAuthData, request: Request, db: Sessi
     except ImportError:
         pass  # Metrics servisi yoksa atla
     
+    logger.info(f"Token oluşturuldu: Kullanıcı {telegram_id}")
     return tokens
 
 @router.get("/me")

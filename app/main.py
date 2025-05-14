@@ -736,7 +736,7 @@ async def broadcast_message(message: dict, request: Request):
             detail=f"Mesaj yayınlama hatası: {str(e)}"
         )
 
-# Ping endpoint'i
+# Ping endpoint'i (GET metodu)
 @app.get("/api/ping", tags=["Health"])
 async def ping():
     """Basit bir sağlık kontrolü için ping endpoint'i"""
@@ -745,32 +745,86 @@ async def ping():
         "timestamp": datetime.now().isoformat()
     }
 
-# SSE için ping endpoint'i
-@app.get("/api/sse/ping/{client_id}", tags=["SSE"])
-async def sse_ping(client_id: str):
-    """Belirli bir client_id için ping kontrolü"""
+# Ping endpoint'i (POST metodu)
+@app.post("/api/ping", tags=["Health"])
+async def ping_post():
+    """Basit bir sağlık kontrolü için ping endpoint'i (POST metodu)"""
     return {
         "status": "pong", 
-        "client_id": client_id,
         "timestamp": datetime.now().isoformat()
     }
 
-# Telegram aktif oturum endpoint'i
-@app.get("/api/telegram/active-session", operation_id="main_get_active_session")
-async def get_active_session():
-    """Aktif Telegram oturumunu döndürür"""
+# SSE için konuya abone olma endpoint'i
+@app.post("/api/sse/subscribe/{client_id}/{topic}", operation_id="main_sse_subscribe")
+async def subscribe_to_topic(client_id: str, topic: str):
+    """Bir istemciyi belirli bir konuya abone eder"""
     try:
-        # Aktif oturum bilgilerini al
-        active_session = {
-            "is_active": True,
-            "timestamp": datetime.now().isoformat()
+        success = await sse_manager.subscribe(client_id, topic)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"İstemci bulunamadı veya abone olunamadı: {client_id}"
+            )
+        return {
+            "success": True,
+            "message": f"İstemci {topic} konusuna abone oldu",
+            "data": {
+                "client_id": client_id,
+                "topic": topic,
+                "timestamp": datetime.now().isoformat()
+            }
         }
-        return active_session
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Aktif oturum bilgisi alınamadı: {str(e)}")
+        logger.error(f"SSE abonelik hatası: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Aktif oturum bilgisi alınamadı"
+            detail=f"Abonelik hatası: {str(e)}"
+        )
+
+# SSE için konuya mesaj yayınlama endpoint'i
+@app.post("/api/sse/publish/{topic}", operation_id="main_sse_publish")
+async def publish_to_topic(topic: str, message: dict):
+    """Belirli bir konuya abone olan tüm istemcilere mesaj yayınlar"""
+    try:
+        recipient_count = await sse_manager.publish_to_topic(topic, {
+            "type": "topic_message",
+            "content": message,
+            "timestamp": datetime.now().isoformat()
+        })
+        return {
+            "success": True,
+            "message": f"Mesaj başarıyla {recipient_count} alıcıya yayınlandı",
+            "data": {
+                "topic": topic,
+                "recipients": recipient_count,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"SSE konu yayınlama hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Konu yayınlama hatası: {str(e)}"
+        )
+
+# SSE istatistikleri endpoint'i
+@app.get("/api/sse/stats", tags=["SSE"], operation_id="main_get_sse_stats")
+async def get_sse_stats():
+    """SSE yöneticisi hakkında istatistikler döndürür"""
+    try:
+        stats = sse_manager.get_stats()
+        return {
+            "success": True,
+            "data": stats,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"SSE istatistik hatası: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"İstatistik alma hatası: {str(e)}"
         )
 
 # SSE Test sayfası endpoint'i
@@ -973,77 +1027,42 @@ mutation OptimizeMessage($message: String!, $groupId: Int!) {
     
     return HTMLResponse(content=html_content)
 
-# SSE için konuya abone olma endpoint'i
-@app.post("/api/sse/subscribe/{client_id}/{topic}", operation_id="main_sse_subscribe")
-async def subscribe_to_topic(client_id: str, topic: str):
-    """Bir istemciyi belirli bir konuya abone eder"""
-    try:
-        success = await sse_manager.subscribe(client_id, topic)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"İstemci bulunamadı veya abone olunamadı: {client_id}"
-            )
-        return {
-            "success": True,
-            "message": f"İstemci {topic} konusuna abone oldu",
-            "data": {
-                "client_id": client_id,
-                "topic": topic,
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"SSE abonelik hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Abonelik hatası: {str(e)}"
-        )
+# SSE için ping endpoint'i
+@app.get("/api/sse/ping/{client_id}", tags=["SSE"])
+async def sse_ping(client_id: str):
+    """Belirli bir client_id için ping kontrolü"""
+    return {
+        "status": "pong", 
+        "client_id": client_id,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+# SSE için ping endpoint'i (POST metodu)
+@app.post("/api/sse/ping/{client_id}", tags=["SSE"])
+async def sse_ping_post(client_id: str):
+    """Belirli bir client_id için ping kontrolü (POST metodu)"""
+    return {
+        "status": "pong", 
+        "client_id": client_id,
+        "timestamp": datetime.now().isoformat()
+    }
 
-# SSE için konuya mesaj yayınlama endpoint'i
-@app.post("/api/sse/publish/{topic}", operation_id="main_sse_publish")
-async def publish_to_topic(topic: str, message: dict):
-    """Belirli bir konuya abone olan tüm istemcilere mesaj yayınlar"""
+# Telegram aktif oturum endpoint'i
+@app.get("/api/telegram/active-session", operation_id="main_get_active_session")
+async def get_active_session():
+    """Aktif Telegram oturumunu döndürür"""
     try:
-        recipient_count = await sse_manager.publish_to_topic(topic, {
-            "type": "topic_message",
-            "content": message,
-            "timestamp": datetime.now().isoformat()
-        })
-        return {
-            "success": True,
-            "message": f"Mesaj başarıyla {recipient_count} alıcıya yayınlandı",
-            "data": {
-                "topic": topic,
-                "recipients": recipient_count,
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-    except Exception as e:
-        logger.error(f"SSE konu yayınlama hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Konu yayınlama hatası: {str(e)}"
-        )
-
-# SSE istatistikleri endpoint'i
-@app.get("/api/sse/stats", tags=["SSE"], operation_id="main_get_sse_stats")
-async def get_sse_stats():
-    """SSE yöneticisi hakkında istatistikler döndürür"""
-    try:
-        stats = sse_manager.get_stats()
-        return {
-            "success": True,
-            "data": stats,
+        # Aktif oturum bilgilerini al
+        active_session = {
+            "is_active": True,
             "timestamp": datetime.now().isoformat()
         }
+        return active_session
     except Exception as e:
-        logger.error(f"SSE istatistik hatası: {str(e)}")
+        logger.error(f"Aktif oturum bilgisi alınamadı: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"İstatistik alma hatası: {str(e)}"
+            detail="Aktif oturum bilgisi alınamadı"
         )
 
 # Geliştirme sunucusunu çalıştır
@@ -1055,7 +1074,7 @@ if __name__ == "__main__":
         uvicorn.run(
             "app.main:app", 
             host="0.0.0.0", 
-            port=8000,  # 8001 yerine 8000 portu kullan
+            port=8001,  # 8000 portu kullanımda olabilir, 8001 kullan
             log_level="info",
             log_config=None,  # Varsayılan ayarları kullan
             access_log=True
