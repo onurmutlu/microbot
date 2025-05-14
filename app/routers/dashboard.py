@@ -17,7 +17,7 @@ from app.services.group_analyzer import GroupAnalyzer
 router = APIRouter(
     prefix="/dashboard",
     tags=["Dashboard"],
-    dependencies=[Depends(get_current_user)]
+    dependencies=[Depends(auth_get_current_user)]
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
