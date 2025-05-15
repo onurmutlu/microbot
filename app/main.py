@@ -188,55 +188,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Telegram MiniApp kimliklendirme middleware'i
+# MiniApp doğrulama middleware'i
 @app.middleware("http")
-async def telegram_miniapp_auth_middleware(request: Request, call_next):
-    """
-    Telegram MiniApp'den gelen istekleri özel olarak işler.
-    initData içeren istekleri yakalayıp, hata durumunda uygun yanıt verir.
-    """
-    # İsteği işle
+async def miniapp_auth_middleware(request: Request, call_next):
+    """MiniApp token doğrulama middleware'i - Telegram Mini App authentication desteği"""
     try:
+        # İleri gönder
         response = await call_next(request)
         return response
     except Exception as e:
-        # Sadece Telegram MiniApp'den gelen istekleri özel olarak işle
-        content_type = request.headers.get("content-type", "")
+        # Hata kontrolü
+        logger.error(f"MiniApp Middleware hatası: {e}")
         
-        is_miniapp_request = False
-        body = None
-        
-        if "application/json" in content_type:
-            try:
-                body = await request.json()
-                # initData varsa, bu bir MiniApp isteğidir
-                is_miniapp_request = "initData" in body
-            except:
-                pass
-        
-        # MiniApp isteği ise özel işlem yap
-        if is_miniapp_request and body:
-            logger.warning(f"MiniApp isteği hatası yakalandı: {str(e)}")
-            
-            # Kullanıcı bilgisini alma
-            user_data = body.get("user", {})
-            if not user_data and body.get("initDataUnsafe"):
-                user_data = body.get("initDataUnsafe", {}).get("user", {})
-            
-            # Daha anlamlı bir yanıt döndür
-            from fastapi.responses import JSONResponse
+        # 401 ve 403 yanıtlar için - Telegram MiniApp için özel hata dönüştürme
+        if isinstance(e, HTTPException) and (e.status_code == 401 or e.status_code == 403):
+            # MiniApp token hatası için özel yanıt
             return JSONResponse(
-                status_code=200,  # 401 yerine, MiniApp'in işleyebileceği 200 dön
+                status_code=200,  # MiniApp 401 hatalarını 200 olarak dönüştür
                 content={
                     "success": False,
                     "error": "auth_required",
                     "message": "Kimlik doğrulama gerekli",
-                    "user_info": user_data
+                    "detail": str(e.detail) if hasattr(e, "detail") else "Yetkilendirme hatası"
                 }
             )
         
-        # MiniApp isteği değilse normal hata yanıtı
-        raise e
+        # Diğer hatalar için normal hata yanıtı
+        return JSONResponse(
+            status_code=200,  # MiniApp için hep 200 döndür
+            content={
+                "success": False,
+                "error": "server_error",
+                "message": str(e)
+            }
+        )
 
 # Güvenlik önlemleri
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
@@ -527,6 +512,7 @@ async def restart_handlers():
 
 # WebSocket endpoint
 @app.websocket("/api/ws")
+@app.websocket("/api/ws/")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket bağlantısını yönetir - Tüm bağlantıları kabul eder"""
     client_id = str(uuid.uuid4())
@@ -547,268 +533,47 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket hatası: {str(e)}")
 
-@app.websocket("/api/ws/{client_id}")
-async def websocket_endpoint_with_id(websocket: WebSocket, client_id: str):
-    """WebSocket bağlantısını özel ID ile yönetir - Basit kimlik kontrolü"""
+# WebSocket endpoint (query params ile)
+@app.websocket("/api/ws/{path:path}")
+async def websocket_endpoint_with_any_path(websocket: WebSocket, path: str):
+    """WebSocket bağlantısını herhangi bir path ile yönetir - MiniApp için özel destek"""
+    client_id = path.split("/")[0] if path else str(uuid.uuid4())
+    
     try:
-        # Parametreleri al (ama doğrulama için kullanma)
-        params = websocket.query_params
-        auth_key = params.get("auth_key")
-        
         # Bağlantıyı her durumda kabul et
         await websocket.accept()
         
         # Bağlantı bilgisini logla
+        params = websocket.query_params
+        auth_key = params.get("auth_key", "none")
         origin = websocket.headers.get("origin", "unknown")
         client_ip = websocket.client.host if hasattr(websocket, 'client') and websocket.client else "unknown"
-        logger.info(f"WebSocket bağlantısı kabul edildi (ID:{client_id}), origin: {origin}, ip: {client_ip}")
         
-        # Varsayılan kullanıcı kimliği
-        user_id = f"client-{client_id}"
-        
-        # Tüm bağlantıları kabul et, ancak token varsa kimliği doğrula
-        if auth_key:
-            if auth_key.startswith("miniapp-"):
-                user_id = f"miniapp-{client_id}"
-                logger.info(f"MiniApp token kabul edildi: {client_id}")
-        
-        # MiniApp bilgisi varsa ekstra log tut
-        init_data = params.get("tgWebAppData")
-        if init_data:
-            logger.info(f"WebSocket MiniApp bağlantısı: {client_id}")
-            user_id = f"miniapp-{client_id}"
+        # Miniapp kontrolü yap
+        is_miniapp = "miniapp" in auth_key if auth_key else False
+        logger.info(f"WebSocket bağlantısı kabul edildi (Path:{path}), MiniApp: {is_miniapp}, origin: {origin}, ip: {client_ip}")
         
         # WebSocketManager ile bağlantıyı yönet
+        user_id = f"miniapp-{client_id}" if is_miniapp else f"client-{client_id}"
         await websocket_manager.handle_websocket(websocket, client_id, user_id)
     except WebSocketDisconnect:
-        logger.info(f"WebSocket bağlantısı kesildi (ID:{client_id})")
+        logger.info(f"WebSocket bağlantısı kesildi (Path:{path})")
     except Exception as e:
-        logger.error(f"WebSocket hatası (ID:{client_id}): {str(e)}")
-
-# Yedek WebSocket endpoint (aynı işlevi farklı URL'lerde sunar)
-@app.websocket("/ws")
-async def websocket_endpoint_alt1(websocket: WebSocket):
-    """Alternatif WebSocket endpoint - Tüm bağlantıları kabul eder"""
-    await websocket_endpoint(websocket)
-
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint_with_id_alt1(websocket: WebSocket, client_id: str):
-    """Alternatif WebSocket endpoint - Tüm bağlantıları kabul eder"""
-    await websocket_endpoint_with_id(websocket, client_id)
-
-@app.websocket("/api/socket/{client_id}")
-async def websocket_endpoint_with_id_alt2(websocket: WebSocket, client_id: str):
-    """Alternatif WebSocket bağlantı noktası (özel ID ile)"""
-    await websocket_endpoint_with_id(websocket, client_id)
-
-@app.websocket("/socket/{client_id}")
-async def websocket_endpoint_with_id_alt3(websocket: WebSocket, client_id: str):
-    """Alternatif WebSocket bağlantı noktası (özel ID ile)"""
-    await websocket_endpoint_with_id(websocket, client_id)
-
-# Server-Sent Events (SSE) endpoint
-@app.get("/api/sse")
-async def sse_endpoint(request: Request):
-    """Server-Sent Events (SSE) bağlantısını yönetir"""
-    client_id = str(uuid.uuid4())
-    user_id = "anonymous"
-    
-    # CORS kontrolü - Global CORS ayarlarını kullan, ayrıca kontrol etme
-    origin = request.headers.get("Origin", "*")
-    
-    async def event_generator():
-        """SSE için event verisi üreten generator"""
-        try:
-            # Bağlantı kurulduğunda başlangıç mesajı gönder
-            logger.info(f"SSE bağlantısı kuruldu: {client_id}, ip: {request.client.host if request.client else 'unknown'}, origin: {origin}")
-            yield f"data: {json.dumps({'type': 'connection', 'client_id': client_id, 'timestamp': datetime.now().isoformat()})}\n\n"
-            
-            # Message queue oluştur
-            message_queue = asyncio.Queue()
-            
-            # SSE Manager'e kaydol
-            await sse_manager.connect(client_id, message_queue)
-            
-            try:
-                # Ping mesajı göndermek için task oluştur
-                async def send_ping():
-                    while True:
-                        try:
-                            await asyncio.sleep(30)  # 30 saniyede bir ping gönder
-                            await message_queue.put({
-                                "type": "ping",
-                                "timestamp": datetime.now().isoformat()
-                            })
-                        except asyncio.CancelledError:
-                            break
-                        except Exception as e:
-                            logger.error(f"SSE ping hatası: {str(e)}")
-                
-                # Ping task'ını başlat
-                ping_task = asyncio.create_task(send_ping())
-                
-                # Mesajları dinlemeye başla
-                while True:
-                    # Queue'dan mesaj al
-                    message = await message_queue.get()
-                    
-                    # Mesajı gönder
-                    yield f"data: {json.dumps(message)}\n\n"
-                    
-                    # Queue işlemi tamamlandı
-                    message_queue.task_done()
-                    
-            except asyncio.CancelledError:
-                logger.info(f"SSE bağlantısı kapatıldı: {client_id}")
-            except Exception as e:
-                logger.error(f"SSE akış hatası: {str(e)}")
-            finally:
-                # Temizlik işlemleri
-                ping_task.cancel()
-                await sse_manager.disconnect(client_id)
-                logger.info(f"SSE bağlantısı sonlandırıldı: {client_id}")
-        
-        except Exception as e:
-            logger.error(f"SSE generator hatası: {str(e)}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'timestamp': datetime.now().isoformat()})}\n\n"
-    
-    # SSE response döndür
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # NGINX için buffering'i devre dışı bırak
-            "Access-Control-Allow-Origin": origin,  # CORS için origin header'ı
-            "Access-Control-Allow-Credentials": "true",    # Credentials (örn. cookie) gönderimi
-            "Access-Control-Expose-Headers": "Content-Type,Content-Length,Date,X-Request-ID"
-        }
-    )
-
-# SSE endpoint - Belirli bir client_id ile
-@app.get("/api/sse/{client_id}")
-async def sse_endpoint_with_id(client_id: str, request: Request):
-    """Belirli bir client_id ile SSE bağlantısını yönetir"""
-    user_id = "anonymous"
-    
-    # CORS kontrolü - Global CORS ayarlarını kullan
-    origin = request.headers.get("Origin", "*")
-    
-    async def event_generator():
-        """SSE için event verisi üreten generator"""
-        try:
-            # Bağlantı kurulduğunda başlangıç mesajı gönder
-            logger.info(f"SSE bağlantısı kuruldu (özel ID): {client_id}, ip: {request.client.host if request.client else 'unknown'}, origin: {origin}")
-            yield f"data: {json.dumps({'type': 'connection', 'client_id': client_id, 'timestamp': datetime.now().isoformat()})}\n\n"
-            
-            # Message queue oluştur
-            message_queue = asyncio.Queue()
-            
-            # SSE Manager'e kaydol
-            await sse_manager.connect(client_id, message_queue)
-            
-            try:
-                # Ping mesajı göndermek için task oluştur
-                async def send_ping():
-                    while True:
-                        try:
-                            await asyncio.sleep(30)  # 30 saniyede bir ping gönder
-                            await message_queue.put({
-                                "type": "ping",
-                                "timestamp": datetime.now().isoformat()
-                            })
-                        except asyncio.CancelledError:
-                            break
-                        except Exception as e:
-                            logger.error(f"SSE ping hatası: {str(e)}")
-                
-                # Ping task'ını başlat
-                ping_task = asyncio.create_task(send_ping())
-                
-                # Mesajları dinlemeye başla
-                while True:
-                    # Queue'dan mesaj al
-                    message = await message_queue.get()
-                    
-                    # Mesajı gönder
-                    yield f"data: {json.dumps(message)}\n\n"
-                    
-                    # Queue işlemi tamamlandı
-                    message_queue.task_done()
-                    
-            except asyncio.CancelledError:
-                logger.info(f"SSE bağlantısı kapatıldı: {client_id}")
-            except Exception as e:
-                logger.error(f"SSE akış hatası: {str(e)}")
-            finally:
-                # Temizlik işlemleri
-                ping_task.cancel()
-                await sse_manager.disconnect(client_id)
-                logger.info(f"SSE bağlantısı sonlandırıldı: {client_id}")
-        
-        except Exception as e:
-            logger.error(f"SSE generator hatası: {str(e)}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e), 'timestamp': datetime.now().isoformat()})}\n\n"
-    
-    # SSE response döndür
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # NGINX için buffering'i devre dışı bırak
-            "Access-Control-Allow-Origin": origin,  # CORS için origin header'ı
-            "Access-Control-Allow-Credentials": "true",    # Credentials (örn. cookie) gönderimi
-            "Access-Control-Expose-Headers": "Content-Type,Content-Length,Date,X-Request-ID"
-        }
-    )
-
-# SSE için mesaj broadcast endpoint'i
-@app.post("/api/sse/broadcast", operation_id="main_sse_broadcast")
-async def broadcast_message(message: dict, request: Request):
-    """Tüm SSE istemcilerine mesaj yayınlar"""
-    try:
-        # Mesajı tüm SSE istemcilerine yayınla
-        await sse_manager.broadcast({
-            "type": "broadcast",
-            "content": message,
-            "sender_ip": request.client.host if request.client else "unknown",
-            "timestamp": datetime.now().isoformat()
-        })
-        return {
-            "success": True,
-            "message": "Mesaj başarıyla yayınlandı",
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"SSE broadcast hatası: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Mesaj yayınlama hatası: {str(e)}"
-        )
+        logger.error(f"WebSocket hatası (Path:{path}): {str(e)}")
 
 # Ping endpoint'i (GET metodu)
 @app.get("/api/ping", tags=["Health"])
 async def ping():
     """Basit bir sağlık kontrolü için ping endpoint'i"""
-    return {
-        "status": "pong", 
-        "timestamp": datetime.now().isoformat()
-    }
+    return {"status": "pong", "timestamp": datetime.now().isoformat()}
 
 # Ping endpoint'i (POST metodu)
 @app.post("/api/ping", tags=["Health"])
 async def ping_post():
     """Basit bir sağlık kontrolü için ping endpoint'i (POST metodu)"""
-    return {
-        "status": "pong", 
-        "timestamp": datetime.now().isoformat(),
-        "method": "POST"
-    }
+    return {"status": "pong", "timestamp": datetime.now().isoformat(), "method": "POST"}
 
-# Yeni CORS middleware
+# CORS ayarları düzeltmesi
 @app.middleware("http")
 async def add_cors_headers(request: Request, call_next):
     """Her istek için CORS başlıklarını ekleyen middleware"""
@@ -819,26 +584,31 @@ async def add_cors_headers(request: Request, call_next):
         # CORS başlıkları ekle
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Telegram-Web-App-User"
-        response.headers["Access-Control-Expose-Headers"] = "Content-Type, Content-Length"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
         
         # OPTIONS istekleri için hızlı yanıt
         if request.method == "OPTIONS":
             return response
             
-        # Response içeriğini değiştirmeden döndür
         return response
     except Exception as e:
         # Hata durumunda yeni yanıt oluştur ve CORS başlıkları ekle
         headers = {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Telegram-Web-App-User",
-            "Access-Control-Expose-Headers": "Content-Type, Content-Length"
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true"
         }
+        
+        # JSON yanıtı döndür
         return JSONResponse(
-            status_code=500,
-            content={"detail": f"CORS middleware hatası: {str(e)}"},
+            status_code=200,  # MiniApp için 200 döndür
+            content={
+                "success": False,
+                "error": "server_error",
+                "message": str(e)
+            },
             headers=headers
         )
 

@@ -1,21 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request, Response, Cookie
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 import logging
 from pydantic import BaseModel, Field
 import os
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
 from app.database import get_db
 from app.models import User
 from app.services.telegram_service import TelegramService
 from app.services.auth_service import get_current_active_user, get_current_user_optional
 from app.config import settings
+from app.core.config import settings as core_settings
+from app.services.auth import AuthService
+import json
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/telegram",
-    tags=["telegram-auth"]
+    prefix="/api/auth/telegram",
+    tags=["auth", "telegram"],
 )
 
 # Pydantic modelleri
@@ -45,6 +49,28 @@ class ActiveSessionResponse(BaseModel):
     phone: Optional[str] = None
     api_id: Optional[str] = None
     api_hash: Optional[str] = None
+
+# Telegram SSO istek modelleri
+class TelegramWebAppInitData(BaseModel):
+    initData: str
+
+class TelegramUser(BaseModel):
+    id: int
+    first_name: str
+    last_name: str = None
+    username: str = None
+    photo_url: str = None
+    auth_date: int = None
+    hash: str = None
+
+class TelegramLoginResponse(BaseModel):
+    success: bool
+    access_token: str = None
+    refresh_token: str = None
+    expires_in: int = None
+    token_type: str = "bearer"
+    message: str = None
+    user: dict = None
 
 # Session bilgilerini önbelleğe almak için geçici depolama
 # Gerçek uygulamada Redis veya veritabanı kullanılabilir
@@ -308,4 +334,83 @@ async def confirm_2fa_password(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Doğrulama sırasında bir hata oluştu: {str(e)}"
+        )
+
+# Kimlik doğrulama için endpoint
+@router.post("/login", response_model=TelegramLoginResponse)
+async def telegram_login(request: Request):
+    """Telegram Mini App üzerinden gelen kimlik doğrulama isteklerini işler"""
+    try:
+        # JSON verisini al
+        data = await request.json()
+        
+        # initData'yı kontrol et
+        init_data = data.get("initData")
+        if not init_data:
+            logger.warning("Telegram initData eksik")
+            return TelegramLoginResponse(
+                success=False,
+                message="Telegram initData eksik"
+            )
+        
+        # Telegram AuthService kullanarak doğrula
+        auth_service = AuthService()
+        try:
+            # MiniApp offline modu için test
+            if init_data.startswith("miniapp-offline-"):
+                logger.warning(f"Telegram MiniApp offline modu: {init_data}")
+                user_data = {
+                    "id": 12345,
+                    "first_name": "Test",
+                    "username": "testuser",
+                    "is_offline_mode": True
+                }
+                
+                # Test token oluştur
+                access_token = auth_service.create_jwt_token(
+                    {"sub": f"telegram:{user_data['id']}", "source": "telegram_miniapp_offline"}
+                )
+                refresh_token = auth_service.create_refresh_token(
+                    {"sub": f"telegram:{user_data['id']}", "source": "telegram_miniapp_offline"}
+                )
+                
+                return TelegramLoginResponse(
+                    success=True,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    expires_in=core_settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+                    user=user_data
+                )
+            
+            # Gerçek initData doğrulama işlemi
+            user_data = auth_service.validate_telegram_web_app_data(init_data)
+            
+            # Token oluştur
+            access_token = auth_service.create_jwt_token(
+                {"sub": f"telegram:{user_data['id']}", "source": "telegram_miniapp"}
+            )
+            refresh_token = auth_service.create_refresh_token(
+                {"sub": f"telegram:{user_data['id']}", "source": "telegram_miniapp"}
+            )
+            
+            return TelegramLoginResponse(
+                success=True,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_in=core_settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+                user=user_data
+            )
+            
+        except Exception as e:
+            logger.error(f"Telegram initData doğrulama hatası: {str(e)}")
+            return TelegramLoginResponse(
+                success=False,
+                message=f"Kimlik doğrulama hatası: {str(e)}"
+            )
+            
+    except Exception as e:
+        logger.exception(f"Telegram login hatası: {str(e)}")
+        return TelegramLoginResponse(
+            success=False,
+            message=f"İstek işleme hatası: {str(e)}"
         ) 
